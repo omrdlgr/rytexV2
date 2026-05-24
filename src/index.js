@@ -10,22 +10,23 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 const fastify = Fastify({ logger: true });
 
+// 1. Plugins
 await fastify.register(cors, {
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
   methods: ['GET', 'POST'],
 });
 
+// 2. Socket.io + decorator — must happen before ready() / listen()
+const io = setupSocket(fastify.server);
+fastify.decorate('io', io);
+
+// 3. Routes
 fastify.register(authRoutes, { prefix: '/api' });
 fastify.register(partnerRoutes, { prefix: '/api' });
 
 fastify.get('/health', async () => ({ status: 'ok' }));
 
-await fastify.ready();
-
-// Attach Socket.io to Fastify's underlying http.Server, then expose on fastify
-const io = setupSocket(fastify.server);
-fastify.decorate('io', io);
-
+// 4. Start
 try {
   await fastify.listen({ port: PORT, host: HOST });
 } catch (err) {
