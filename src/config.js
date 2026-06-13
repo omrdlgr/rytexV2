@@ -17,4 +17,28 @@ if (!JWT_SECRET || INSECURE_DEFAULTS.has(JWT_SECRET) || JWT_SECRET.length < 32) 
   process.exit(1);
 }
 
-export { JWT_SECRET };
+// ── CORS origin politikası ──────────────────────────────────────────
+// ALLOWED_ORIGINS = virgülle ayrık origin listesi.
+// Production: tanımsız/boşsa boot'ta çök — '*' ile herkese açık API olmaz.
+// Dev (NODE_ENV !== 'production'): kolaylık için '*' serbest.
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+const _origins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+if (IS_PROD && _origins.length === 0) {
+  console.error(
+    'FATAL: Production ortamında ALLOWED_ORIGINS tanımlı değil. ' +
+      "CORS '*' ile açık bırakılamaz. " +
+      "Örn: `fly secrets set ALLOWED_ORIGINS=https://rytex.app,https://rytex.org`.",
+  );
+  process.exit(1);
+}
+
+// Fastify/Socket.io cors `origin` değeri: prod'da whitelist dizisi,
+// dev'de liste verilmişse onu, yoksa '*'.
+const CORS_ORIGIN = _origins.length > 0 ? _origins : '*';
+
+export { JWT_SECRET, CORS_ORIGIN };

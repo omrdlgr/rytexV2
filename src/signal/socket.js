@@ -2,12 +2,12 @@ import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { peers } from '../routes/partner.js';
 import { partnerRequests, partnerships } from '../db.js';
-import { JWT_SECRET } from '../config.js';
+import { JWT_SECRET, CORS_ORIGIN } from '../config.js';
 
 export function setupSocket(httpServer) {
   const io = new Server(httpServer, {
     cors: {
-      origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+      origin: CORS_ORIGIN, // B5: açık '*' default kaldırıldı (config.js)
       methods: ['GET', 'POST'],
     },
     transports: ['websocket', 'polling'],

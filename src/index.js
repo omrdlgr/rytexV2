@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import { setupSocket } from './signal/socket.js';
 import authRoutes from './routes/auth.js';
 import partnerRoutes from './routes/partner.js';
+import { CORS_ORIGIN } from './config.js';
 
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -14,8 +15,10 @@ const HOST = process.env.HOST || '0.0.0.0';
 const fastify = Fastify({ logger: true, trustProxy: true });
 
 // 1. Plugins
+// CORS_ORIGIN: prod'da whitelist dizisi (config.js boot'ta zorunlu kılar),
+// dev'de '*'. Açık '*' default'u kaldırıldı (B5).
 await fastify.register(cors, {
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
+  origin: CORS_ORIGIN,
   methods: ['GET', 'POST'],
 });
 
