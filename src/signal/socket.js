@@ -104,7 +104,14 @@ export function setupSocket(httpServer) {
       }
     });
 
+    // reject (B6): Yalnız gerçekten `to`'dan userHash'e gelmiş bekleyen
+    // istek reddedilebilir. Aksi halde herhangi biri herhangi peer'a
+    // partner:rejected spam'leyebilirdi.
     socket.on('partner:reject', ({ to }) => {
+      if (!partnerRequests.has(to, userHash)) {
+        socket.emit('partner:error', { code: 'no_pending_request', to });
+        return;
+      }
       partnerRequests.delete(to, userHash);
 
       const target = peers.get(to);

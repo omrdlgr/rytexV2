@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config.js';
-import { partnerRequests } from '../db.js';
+import { partnerRequests, partnerships } from '../db.js';
 
 // In-memory store: phoneHash → { socketId, connectedTo }
 // Replace with Redis/DB for multi-instance deployments
@@ -69,6 +69,11 @@ export default async function partnerRoutes(fastify) {
 
     if (requesterHash === partnerHash) {
       return reply.code(400).send({ error: 'cannot_connect_to_self' });
+    }
+
+    // Zaten partnerse tekrar istek/spam üretme (B6).
+    if (partnerships.isPartner(requesterHash, partnerHash)) {
+      return reply.code(409).send({ error: 'already_partners' });
     }
 
     const partnerPeer = peers.get(partnerHash);
