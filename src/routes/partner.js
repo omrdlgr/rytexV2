@@ -1,11 +1,10 @@
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config.js';
+import { partnerRequests } from '../db.js';
 
 // In-memory store: phoneHash → { socketId, connectedTo }
 // Replace with Redis/DB for multi-instance deployments
 export const peers = new Map();
-// Pending connection requests: requesterHash → targetHash
-const pendingRequests = new Map();
 
 function authenticate(request, reply) {
   const auth = request.headers.authorization;
@@ -77,7 +76,8 @@ export default async function partnerRoutes(fastify) {
       return reply.code(404).send({ error: 'partner_offline' });
     }
 
-    pendingRequests.set(requesterHash, partnerHash);
+    // Bekleyen isteği kalıcı sakla — partner:accept bunu doğrular (B4/B6).
+    partnerRequests.create(requesterHash, partnerHash);
 
     // Notify partner via Socket.io (io instance attached by setupSocket)
     const io = fastify.io;

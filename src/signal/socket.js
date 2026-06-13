@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { peers } from '../routes/partner.js';
+import { partnerRequests, partnerships } from '../db.js';
 import { JWT_SECRET } from '../config.js';
 
 export function setupSocket(httpServer) {
@@ -32,9 +33,16 @@ export function setupSocket(httpServer) {
     socket.join(userHash);
 
     // ── WebRTC Signaling ──────────────────────────────────────────
+    // YETKİ (B4): Yalnız kabul edilmiş partner çiftleri signal alışverişi
+    // yapabilir. Aksi halde herhangi authenticated kullanıcı, partneri
+    // olmayan birine offer/ice gönderip taciz/iz sürme yapabilirdi.
 
     // Caller sends offer to partner
     socket.on('signal:offer', ({ to, offer }) => {
+      if (!partnerships.isPartner(userHash, to)) {
+        socket.emit('signal:error', { code: 'not_authorized', to });
+        return;
+      }
       const target = peers.get(to);
       if (!target?.socketId) {
         socket.emit('signal:error', { code: 'peer_offline', to });
@@ -48,6 +56,10 @@ export function setupSocket(httpServer) {
 
     // Callee responds with answer
     socket.on('signal:answer', ({ to, answer }) => {
+      if (!partnerships.isPartner(userHash, to)) {
+        socket.emit('signal:error', { code: 'not_authorized', to });
+        return;
+      }
       const target = peers.get(to);
       if (!target?.socketId) {
         socket.emit('signal:error', { code: 'peer_offline', to });
@@ -61,6 +73,10 @@ export function setupSocket(httpServer) {
 
     // ICE candidate exchange
     socket.on('signal:ice', ({ to, candidate }) => {
+      if (!partnerships.isPartner(userHash, to)) {
+        socket.emit('signal:error', { code: 'not_authorized', to });
+        return;
+      }
       const target = peers.get(to);
       if (target?.socketId) {
         io.to(target.socketId).emit('signal:ice', {
@@ -70,8 +86,18 @@ export function setupSocket(httpServer) {
       }
     });
 
-    // Partner accepted/rejected the connection request
+    // Partner accepted/rejected the connection request.
+    // accept (B4/B6): Yalnız gerçekten `to`'dan userHash'e gelmiş bekleyen
+    // istek varsa partnership kurulur. Sahte accept ile yetkisiz çift
+    // oluşturulması engellenir.
     socket.on('partner:accept', ({ to }) => {
+      if (!partnerRequests.has(to, userHash)) {
+        socket.emit('partner:error', { code: 'no_pending_request', to });
+        return;
+      }
+      partnerships.add(userHash, to);
+      partnerRequests.delete(to, userHash);
+
       const target = peers.get(to);
       if (target?.socketId) {
         io.to(target.socketId).emit('partner:accepted', { from: userHash });
@@ -79,6 +105,8 @@ export function setupSocket(httpServer) {
     });
 
     socket.on('partner:reject', ({ to }) => {
+      partnerRequests.delete(to, userHash);
+
       const target = peers.get(to);
       if (target?.socketId) {
         io.to(target.socketId).emit('partner:rejected', { from: userHash });

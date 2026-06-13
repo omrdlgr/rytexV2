@@ -18,6 +18,23 @@ db.exec(`
     password_hash TEXT NOT NULL,
     created_at    INTEGER NOT NULL
   );
+
+  -- Bekleyen bağlantı istekleri: from_hash, to_hash'e istek attı.
+  CREATE TABLE IF NOT EXISTS partner_requests (
+    from_hash  TEXT NOT NULL,
+    to_hash    TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (from_hash, to_hash)
+  );
+
+  -- Kabul edilmiş partner çiftleri. Pair normalize (a<b) saklanır,
+  -- yön farketmez — isPartner her iki sırayı da kapsar.
+  CREATE TABLE IF NOT EXISTS partnerships (
+    a_hash     TEXT NOT NULL,
+    b_hash     TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (a_hash, b_hash)
+  );
 `);
 
 const _insert = db.prepare(
@@ -40,6 +57,57 @@ export const userStore = {
   },
   create(phoneHash, passwordHash) {
     _insert.run(phoneHash, passwordHash, Date.now());
+  },
+};
+
+// ── Partner istek / partnership deposu ──────────────────────────────
+
+const _reqInsert = db.prepare(
+  `INSERT INTO partner_requests (from_hash, to_hash, created_at) VALUES (?, ?, ?)
+   ON CONFLICT(from_hash, to_hash) DO UPDATE SET created_at = excluded.created_at`,
+);
+const _reqGet = db.prepare(
+  'SELECT 1 FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
+);
+const _reqDelete = db.prepare(
+  'DELETE FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
+);
+
+export const partnerRequests = {
+  // requester → target istek attı
+  create(fromHash, toHash) {
+    _reqInsert.run(fromHash, toHash, Date.now());
+  },
+  // toHash, fromHash'ten bekleyen istek var mı?
+  has(fromHash, toHash) {
+    return _reqGet.get(fromHash, toHash) !== undefined;
+  },
+  delete(fromHash, toHash) {
+    _reqDelete.run(fromHash, toHash);
+  },
+};
+
+// Pair normalize: leksikografik sıra, yön bağımsız.
+function _pair(a, b) {
+  return a < b ? [a, b] : [b, a];
+}
+
+const _partInsert = db.prepare(
+  `INSERT INTO partnerships (a_hash, b_hash, created_at) VALUES (?, ?, ?)
+   ON CONFLICT(a_hash, b_hash) DO NOTHING`,
+);
+const _partGet = db.prepare(
+  'SELECT 1 FROM partnerships WHERE a_hash = ? AND b_hash = ?',
+);
+
+export const partnerships = {
+  add(x, y) {
+    const [a, b] = _pair(x, y);
+    _partInsert.run(a, b, Date.now());
+  },
+  isPartner(x, y) {
+    const [a, b] = _pair(x, y);
+    return _partGet.get(a, b) !== undefined;
   },
 };
 
