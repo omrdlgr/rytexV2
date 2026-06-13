@@ -9,6 +9,8 @@ export default async function authRoutes(fastify) {
   // POST /api/register
   // Body: { phoneHash: string, password: string }
   fastify.post('/register', {
+    // Brute-force/spam koruması: IP başına dakikada 5 deneme
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     schema: {
       body: {
         type: 'object',
@@ -36,6 +38,8 @@ export default async function authRoutes(fastify) {
   // POST /api/login
   // Body: { phoneHash: string, password: string }
   fastify.post('/login', {
+    // Brute-force koruması: IP başına dakikada 5 deneme
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
     schema: {
       body: {
         type: 'object',

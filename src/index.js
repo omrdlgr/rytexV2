@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
 import { setupSocket } from './signal/socket.js';
 import authRoutes from './routes/auth.js';
 import partnerRoutes from './routes/partner.js';
@@ -8,12 +9,22 @@ import partnerRoutes from './routes/partner.js';
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
 
-const fastify = Fastify({ logger: true });
+// trustProxy: Fly proxy arkasında gerçek istemci IP'si X-Forwarded-For'da.
+// Olmadan rate-limit tüm trafiği tek (proxy) IP'ye bucketlar — yanlış.
+const fastify = Fastify({ logger: true, trustProxy: true });
 
 // 1. Plugins
 await fastify.register(cors, {
   origin: process.env.ALLOWED_ORIGINS?.split(',') || '*',
   methods: ['GET', 'POST'],
+});
+
+// Global rate limit — IP başına dakikada 100 istek (genel kötüye kullanım)
+// Auth route'ları kendi sıkı limitlerini ayrıca uygular (bkz. auth.js).
+await fastify.register(rateLimit, {
+  global: true,
+  max: 100,
+  timeWindow: '1 minute',
 });
 
 // 2. Socket.io + decorator — must happen before ready() / listen()
