@@ -8,6 +8,13 @@ primary_region = "fra"
   PORT = "3000"
   HOST = "0.0.0.0"
   NODE_ENV = "production"
+  DB_PATH = "/data/rytex.db"
+
+# Kalıcı SQLite deposu — bu volume olmadan makine restart'ında DB uçar.
+# Oluştur: fly volumes create rytex_data --size 1 -a rytex-backend -r fra
+[mounts]
+  source = "rytex_data"
+  destination = "/data"
 
 [http_service]
   internal_port = 3000

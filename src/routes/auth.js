@@ -1,9 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { JWT_SECRET } from '../config.js';
-
-// In-memory store — replace with a real DB (SQLite/Postgres) before prod
-const users = new Map();
+import { userStore } from '../db.js';
 
 const SALT_ROUNDS = 12;
 
@@ -24,12 +22,12 @@ export default async function authRoutes(fastify) {
   }, async (request, reply) => {
     const { phoneHash, password } = request.body;
 
-    if (users.has(phoneHash)) {
+    if (userStore.has(phoneHash)) {
       return reply.code(409).send({ error: 'already_registered' });
     }
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    users.set(phoneHash, { phoneHash, passwordHash, createdAt: Date.now() });
+    userStore.create(phoneHash, passwordHash);
 
     const token = jwt.sign({ sub: phoneHash }, JWT_SECRET, { expiresIn: '30d' });
     return reply.code(201).send({ token });
@@ -51,7 +49,7 @@ export default async function authRoutes(fastify) {
   }, async (request, reply) => {
     const { phoneHash, password } = request.body;
 
-    const user = users.get(phoneHash);
+    const user = userStore.get(phoneHash);
     if (!user) {
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
