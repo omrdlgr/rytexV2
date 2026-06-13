@@ -1,8 +1,7 @@
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { peers } from '../routes/partner.js';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-prod';
+import { JWT_SECRET } from '../config.js';
 
 export function setupSocket(httpServer) {
   const io = new Server(httpServer, {

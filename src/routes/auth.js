@@ -1,10 +1,10 @@
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../config.js';
 
 // In-memory store — replace with a real DB (SQLite/Postgres) before prod
 const users = new Map();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-prod';
 const SALT_ROUNDS = 12;
 
 export default async function authRoutes(fastify) {

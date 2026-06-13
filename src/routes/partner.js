@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-prod';
+import { JWT_SECRET } from '../config.js';
 
 // In-memory store: phoneHash → { socketId, connectedTo }
 // Replace with Redis/DB for multi-instance deployments
