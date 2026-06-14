@@ -1,24 +1,9 @@
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '../config.js';
 import { partnerRequests, partnerships } from '../db.js';
+import { authenticateRequest } from '../token.js';
 
 // In-memory store: phoneHash → { socketId, connectedTo }
 // Replace with Redis/DB for multi-instance deployments
 export const peers = new Map();
-
-function authenticate(request, reply) {
-  const auth = request.headers.authorization;
-  if (!auth?.startsWith('Bearer ')) {
-    reply.code(401).send({ error: 'missing_token' });
-    return null;
-  }
-  try {
-    return jwt.verify(auth.slice(7), JWT_SECRET);
-  } catch {
-    reply.code(401).send({ error: 'invalid_token' });
-    return null;
-  }
-}
 
 export default async function partnerRoutes(fastify) {
   // POST /api/partner/find
@@ -30,12 +15,12 @@ export default async function partnerRoutes(fastify) {
         type: 'object',
         required: ['partnerHash'],
         properties: {
-          partnerHash: { type: 'string' },
+          partnerHash: { type: 'string', minLength: 8 },
         },
       },
     },
   }, async (request, reply) => {
-    const claims = authenticate(request, reply);
+    const claims = authenticateRequest(request, reply);
     if (!claims) return;
 
     const { partnerHash } = request.body;
@@ -56,12 +41,12 @@ export default async function partnerRoutes(fastify) {
         type: 'object',
         required: ['partnerHash'],
         properties: {
-          partnerHash: { type: 'string' },
+          partnerHash: { type: 'string', minLength: 8 },
         },
       },
     },
   }, async (request, reply) => {
-    const claims = authenticate(request, reply);
+    const claims = authenticateRequest(request, reply);
     if (!claims) return;
 
     const requesterHash = claims.sub;

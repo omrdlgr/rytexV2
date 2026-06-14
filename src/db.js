@@ -35,6 +35,13 @@ db.exec(`
     created_at INTEGER NOT NULL,
     PRIMARY KEY (a_hash, b_hash)
   );
+
+  -- İptal edilmiş JWT'ler (logout). jti = token kimliği, exp = token'ın
+  -- bitiş zamanı (saniye, JWT exp claim'i). exp geçince satır budanır.
+  CREATE TABLE IF NOT EXISTS revoked_tokens (
+    jti TEXT PRIMARY KEY,
+    exp INTEGER NOT NULL
+  );
 `);
 
 const _insert = db.prepare(
@@ -108,6 +115,27 @@ export const partnerships = {
   isPartner(x, y) {
     const [a, b] = _pair(x, y);
     return _partGet.get(a, b) !== undefined;
+  },
+};
+
+// ── İptal edilmiş token deposu (JWT revocation) ─────────────────────
+
+const _revInsert = db.prepare(
+  `INSERT INTO revoked_tokens (jti, exp) VALUES (?, ?)
+   ON CONFLICT(jti) DO NOTHING`,
+);
+const _revGet = db.prepare('SELECT 1 FROM revoked_tokens WHERE jti = ?');
+const _revPrune = db.prepare('DELETE FROM revoked_tokens WHERE exp < ?');
+
+export const revokedTokens = {
+  // exp: JWT exp claim'i (saniye)
+  revoke(jti, exp) {
+    _revInsert.run(jti, exp);
+    // Süresi geçmişleri temizle — tablo şişmesin.
+    _revPrune.run(Math.floor(Date.now() / 1000));
+  },
+  isRevoked(jti) {
+    return _revGet.get(jti) !== undefined;
   },
 };
 

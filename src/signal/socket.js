@@ -1,8 +1,8 @@
 import { Server } from 'socket.io';
-import jwt from 'jsonwebtoken';
 import { peers } from '../routes/partner.js';
 import { partnerRequests, partnerships } from '../db.js';
-import { JWT_SECRET, CORS_ORIGIN } from '../config.js';
+import { CORS_ORIGIN } from '../config.js';
+import { verifyToken } from '../token.js';
 
 export function setupSocket(httpServer) {
   const io = new Server(httpServer, {
@@ -13,12 +13,12 @@ export function setupSocket(httpServer) {
     transports: ['websocket', 'polling'],
   });
 
-  // JWT auth middleware
+  // JWT auth middleware — verifyToken iptal listesini de kontrol eder (B7)
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('missing_token'));
     try {
-      socket.userHash = jwt.verify(token, JWT_SECRET).sub;
+      socket.userHash = verifyToken(token).sub;
       next();
     } catch {
       next(new Error('invalid_token'));
@@ -124,9 +124,6 @@ export function setupSocket(httpServer) {
       peers.delete(userHash);
     });
   });
-
-  // Expose io on fastify server for use in route handlers
-  httpServer._rytexIo = io;
 
   return io;
 }

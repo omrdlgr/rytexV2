@@ -1,7 +1,6 @@
 import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-import { JWT_SECRET } from '../config.js';
 import { userStore } from '../db.js';
+import { signToken, revokeToken, authenticateRequest } from '../token.js';
 
 const SALT_ROUNDS = 12;
 
@@ -31,7 +30,7 @@ export default async function authRoutes(fastify) {
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     userStore.create(phoneHash, passwordHash);
 
-    const token = jwt.sign({ sub: phoneHash }, JWT_SECRET, { expiresIn: '30d' });
+    const token = signToken(phoneHash);
     return reply.code(201).send({ token });
   });
 
@@ -45,7 +44,8 @@ export default async function authRoutes(fastify) {
         type: 'object',
         required: ['phoneHash', 'password'],
         properties: {
-          phoneHash: { type: 'string' },
+          // minLength register ile tutarlı (B7) — şema doğrulama simetrisi
+          phoneHash: { type: 'string', minLength: 8 },
           password: { type: 'string' },
         },
       },
@@ -63,7 +63,16 @@ export default async function authRoutes(fastify) {
       return reply.code(401).send({ error: 'invalid_credentials' });
     }
 
-    const token = jwt.sign({ sub: phoneHash }, JWT_SECRET, { expiresIn: '30d' });
+    const token = signToken(phoneHash);
     return reply.send({ token });
+  });
+
+  // POST /api/logout — mevcut token'ı iptal eder (B7 revocation).
+  // Header: Authorization: Bearer <token>
+  fastify.post('/logout', async (request, reply) => {
+    const claims = authenticateRequest(request, reply);
+    if (!claims) return;
+    revokeToken(claims);
+    return reply.send({ status: 'logged_out' });
   });
 }
