@@ -60,6 +60,19 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     PRIMARY KEY (from_hash, to_hash)
   );
+
+  -- SPARK mesajları (mahremiyet isteği). Uçtan uca şifreli — sunucu içeriği
+  -- OKUYAMAZ. İki yönlü: from_hash → to_hash istek; to_hash cevap yazar.
+  CREATE TABLE IF NOT EXISTS sparks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_hash  TEXT NOT NULL,
+    to_hash    TEXT NOT NULL,
+    req_blob   TEXT NOT NULL,       -- şifreli istek (alıcı için)
+    status     TEXT NOT NULL DEFAULT 'pending',
+    resp_blob  TEXT,                -- şifreli cevap (gönderen için; öneri vb.)
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `);
 
 const _insert = db.prepare(
@@ -203,6 +216,52 @@ export const shares = {
   },
   delete(fromHash, toHash) {
     _shDelete.run(fromHash, toHash);
+  },
+};
+
+// ── SPARK deposu (uçtan uca şifreli mahremiyet mesajı) ──────────────
+
+const _sparkInsert = db.prepare(
+  `INSERT INTO sparks (from_hash, to_hash, req_blob, status, created_at, updated_at)
+   VALUES (?, ?, ?, 'pending', ?, ?)`,
+);
+const _sparkForUser = db.prepare(
+  `SELECT id, from_hash, to_hash, req_blob, status, resp_blob, created_at, updated_at
+   FROM sparks WHERE from_hash = ? OR to_hash = ? ORDER BY updated_at DESC LIMIT 100`,
+);
+const _sparkGet = db.prepare('SELECT * FROM sparks WHERE id = ?');
+const _sparkRespond = db.prepare(
+  `UPDATE sparks SET status = ?, resp_blob = ?, updated_at = ? WHERE id = ?`,
+);
+const _sparkDelete = db.prepare('DELETE FROM sparks WHERE id = ?');
+
+export const sparks = {
+  create(fromHash, toHash, reqBlob) {
+    const now = Date.now();
+    const info = _sparkInsert.run(fromHash, toHash, reqBlob, now, now);
+    return info.lastInsertRowid;
+  },
+  // from VEYA to = user (iki yön; gönderen cevabı da görsün).
+  forUser(userHash) {
+    return _sparkForUser.all(userHash, userHash).map((r) => ({
+      id: r.id,
+      from: r.from_hash,
+      to: r.to_hash,
+      reqBlob: r.req_blob,
+      status: r.status,
+      respBlob: r.resp_blob ?? null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+  },
+  get(id) {
+    return _sparkGet.get(id);
+  },
+  respond(id, status, respBlob) {
+    _sparkRespond.run(status, respBlob ?? null, Date.now(), id);
+  },
+  delete(id) {
+    _sparkDelete.run(id);
   },
 };
 
