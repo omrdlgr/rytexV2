@@ -1,8 +1,15 @@
 import bcrypt from 'bcrypt';
+import { createHash } from 'node:crypto';
 import { userStore } from '../db.js';
 import { signToken, revokeToken, authenticateRequest } from '../token.js';
+import { verifyPhoneToken } from '../firebase.js';
 
 const SALT_ROUNDS = 12;
+
+// Frontend phoneHashOf ile AYNI: SHA-256(E.164 numara), hex.
+function phoneHashOf(phoneE164) {
+  return createHash('sha256').update(phoneE164, 'utf8').digest('hex');
+}
 
 export default async function authRoutes(fastify) {
   // POST /api/register
@@ -65,6 +72,29 @@ export default async function authRoutes(fastify) {
 
     const token = signToken(phoneHash);
     return reply.send({ token });
+  });
+
+  // POST /api/verify-phone — Firebase telefon doğrulaması.
+  // Body: { idToken }  → Firebase ID token doğrulanır, phone_number'dan
+  // phoneHash türetilir, kullanıcı yoksa oluşturulur, bizim JWT döner.
+  fastify.post('/verify-phone', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    schema: {
+      body: {
+        type: 'object',
+        required: ['idToken'],
+        properties: { idToken: { type: 'string', minLength: 20 } },
+      },
+    },
+  }, async (request, reply) => {
+    const phone = await verifyPhoneToken(request.body.idToken);
+    if (!phone) {
+      return reply.code(401).send({ error: 'invalid_token' });
+    }
+    const phoneHash = phoneHashOf(phone);
+    userStore.ensurePhone(phoneHash);
+    const token = signToken(phoneHash);
+    return reply.send({ token, phoneHash });
   });
 
   // POST /api/logout — mevcut token'ı iptal eder (B7 revocation).

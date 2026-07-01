@@ -96,6 +96,12 @@ export const userStore = {
   create(phoneHash, passwordHash) {
     _insert.run(phoneHash, passwordHash, Date.now());
   },
+  // Telefon doğrulamalı kullanıcı (şifresiz). Yoksa oluşturur.
+  ensurePhone(phoneHash) {
+    if (_get.get(phoneHash) === undefined) {
+      _insert.run(phoneHash, '', Date.now());
+    }
+  },
 };
 
 // ── Partner istek / partnership deposu ──────────────────────────────
