@@ -42,6 +42,24 @@ db.exec(`
     jti TEXT PRIMARY KEY,
     exp INTEGER NOT NULL
   );
+
+  -- Kullanıcı ORTAK anahtarları (X25519, base64). Uçtan-uca şifreleme için;
+  -- sunucu yalnız ortak anahtarı bilir, özel anahtar hep cihazda.
+  CREATE TABLE IF NOT EXISTS public_keys (
+    phone_hash TEXT PRIMARY KEY,
+    pub_key    TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  -- Şifreli paylaşım kutuları. Sunucu içeriği (blob) OKUYAMAZ. Çift başına
+  -- en güncel blob tutulur (from_hash sahibi → to_hash izleyici).
+  CREATE TABLE IF NOT EXISTS shares (
+    from_hash  TEXT NOT NULL,
+    to_hash    TEXT NOT NULL,
+    blob       TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (from_hash, to_hash)
+  );
 `);
 
 const _insert = db.prepare(
@@ -136,6 +154,55 @@ export const revokedTokens = {
   },
   isRevoked(jti) {
     return _revGet.get(jti) !== undefined;
+  },
+};
+
+// ── Ortak anahtar deposu (uçtan-uca şifreleme) ──────────────────────
+
+const _pkSet = db.prepare(
+  `INSERT INTO public_keys (phone_hash, pub_key, updated_at) VALUES (?, ?, ?)
+   ON CONFLICT(phone_hash) DO UPDATE SET pub_key = excluded.pub_key, updated_at = excluded.updated_at`,
+);
+const _pkGet = db.prepare('SELECT pub_key FROM public_keys WHERE phone_hash = ?');
+
+export const publicKeys = {
+  set(phoneHash, pubKey) {
+    _pkSet.run(phoneHash, pubKey, Date.now());
+  },
+  get(phoneHash) {
+    const row = _pkGet.get(phoneHash);
+    return row ? row.pub_key : undefined;
+  },
+};
+
+// ── Şifreli paylaşım kutusu deposu ──────────────────────────────────
+
+const _shPut = db.prepare(
+  `INSERT INTO shares (from_hash, to_hash, blob, updated_at) VALUES (?, ?, ?, ?)
+   ON CONFLICT(from_hash, to_hash) DO UPDATE SET blob = excluded.blob, updated_at = excluded.updated_at`,
+);
+const _shForRecipient = db.prepare(
+  'SELECT from_hash, blob, updated_at FROM shares WHERE to_hash = ?',
+);
+const _shDelete = db.prepare(
+  'DELETE FROM shares WHERE from_hash = ? AND to_hash = ?',
+);
+
+export const shares = {
+  // sahip (from) → izleyici (to) için şifreli blob (upsert, en güncel).
+  put(fromHash, toHash, blob) {
+    _shPut.run(fromHash, toHash, blob, Date.now());
+  },
+  // izleyiciye (to) gelen tüm şifreli kutular.
+  forRecipient(toHash) {
+    return _shForRecipient.all(toHash).map((r) => ({
+      from: r.from_hash,
+      blob: r.blob,
+      updatedAt: r.updated_at,
+    }));
+  },
+  delete(fromHash, toHash) {
+    _shDelete.run(fromHash, toHash);
   },
 };
 

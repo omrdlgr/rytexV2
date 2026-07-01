@@ -5,6 +5,7 @@ import rateLimit from '@fastify/rate-limit';
 import { setupSocket } from './signal/socket.js';
 import authRoutes from './routes/auth.js';
 import partnerRoutes from './routes/partner.js';
+import shareRoutes from './routes/share.js';
 import { CORS_ORIGIN } from './config.js';
 
 const PORT = process.env.PORT || 3000;
@@ -37,6 +38,7 @@ fastify.decorate('io', io);
 // 3. Routes
 fastify.register(authRoutes, { prefix: '/api' });
 fastify.register(partnerRoutes, { prefix: '/api' });
+fastify.register(shareRoutes, { prefix: '/api' });
 
 fastify.get('/health', async () => ({ status: 'ok' }));
 
