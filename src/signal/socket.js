@@ -32,60 +32,6 @@ export function setupSocket(httpServer) {
     peers.set(userHash, { socketId: socket.id });
     socket.join(userHash);
 
-    // ── WebRTC Signaling ──────────────────────────────────────────
-    // YETKİ (B4): Yalnız kabul edilmiş partner çiftleri signal alışverişi
-    // yapabilir. Aksi halde herhangi authenticated kullanıcı, partneri
-    // olmayan birine offer/ice gönderip taciz/iz sürme yapabilirdi.
-
-    // Caller sends offer to partner
-    socket.on('signal:offer', ({ to, offer }) => {
-      if (!partnerships.isPartner(userHash, to)) {
-        socket.emit('signal:error', { code: 'not_authorized', to });
-        return;
-      }
-      const target = peers.get(to);
-      if (!target?.socketId) {
-        socket.emit('signal:error', { code: 'peer_offline', to });
-        return;
-      }
-      io.to(target.socketId).emit('signal:offer', {
-        from: userHash,
-        offer,
-      });
-    });
-
-    // Callee responds with answer
-    socket.on('signal:answer', ({ to, answer }) => {
-      if (!partnerships.isPartner(userHash, to)) {
-        socket.emit('signal:error', { code: 'not_authorized', to });
-        return;
-      }
-      const target = peers.get(to);
-      if (!target?.socketId) {
-        socket.emit('signal:error', { code: 'peer_offline', to });
-        return;
-      }
-      io.to(target.socketId).emit('signal:answer', {
-        from: userHash,
-        answer,
-      });
-    });
-
-    // ICE candidate exchange
-    socket.on('signal:ice', ({ to, candidate }) => {
-      if (!partnerships.isPartner(userHash, to)) {
-        socket.emit('signal:error', { code: 'not_authorized', to });
-        return;
-      }
-      const target = peers.get(to);
-      if (target?.socketId) {
-        io.to(target.socketId).emit('signal:ice', {
-          from: userHash,
-          candidate,
-        });
-      }
-    });
-
     // Partner accepted/rejected the connection request.
     // accept (B4/B6): Yalnız gerçekten `to`'dan userHash'e gelmiş bekleyen
     // istek varsa partnership kurulur. Sahte accept ile yetkisiz çift
