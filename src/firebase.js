@@ -1,8 +1,11 @@
-import admin from 'firebase-admin';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 
 // Firebase Admin — telefon doğrulama ID token'larını doğrular.
 // FIREBASE_SERVICE_ACCOUNT_JSON: servis hesabı JSON'u (string). Yoksa
 // telefon doğrulama devre dışı (verifyPhoneToken null döner).
+// NOT: firebase-admin v14 ESM'de eski `admin.credential.cert` namespace'i
+// YOK (undefined) — modüler API (firebase-admin/app) zorunlu.
 let _app = null;
 
 function app() {
@@ -10,8 +13,12 @@ function app() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!raw) return null;
   try {
-    const cred = JSON.parse(raw);
-    _app = admin.initializeApp({ credential: admin.credential.cert(cred) });
+    const existing = getApps();
+    if (existing.length > 0) {
+      _app = existing[0];
+      return _app;
+    }
+    _app = initializeApp({ credential: cert(JSON.parse(raw)) });
     return _app;
   } catch (e) {
     console.error('[FIREBASE] init hata:', e.message);
@@ -24,7 +31,7 @@ export async function verifyPhoneToken(idToken) {
   const a = app();
   if (!a) return null;
   try {
-    const decoded = await admin.auth(a).verifyIdToken(idToken);
+    const decoded = await getAuth(a).verifyIdToken(idToken);
     return decoded.phone_number || null;
   } catch (e) {
     console.error('[FIREBASE] verifyIdToken hata:', e.message);
