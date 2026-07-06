@@ -79,4 +79,14 @@ export default async function partnerRoutes(fastify) {
 
     return reply.send({ status: 'request_sent' });
   });
+
+  // GET /api/partner/list
+  // Çağıranın onaylı partner hash'leri. İstemci offline'dayken kabul edilen
+  // istekleri yakalayıp yerel "pending" durumunu düzeltmek için kullanılır.
+  fastify.get('/partner/list', async (request, reply) => {
+    const claims = authenticateRequest(request, reply);
+    if (!claims) return;
+
+    return reply.send({ partners: partnerships.listFor(claims.sub) });
+  });
 }

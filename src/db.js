@@ -143,6 +143,9 @@ const _partInsert = db.prepare(
 const _partGet = db.prepare(
   'SELECT 1 FROM partnerships WHERE a_hash = ? AND b_hash = ?',
 );
+const _partList = db.prepare(
+  'SELECT a_hash, b_hash FROM partnerships WHERE a_hash = ? OR b_hash = ?',
+);
 
 export const partnerships = {
   add(x, y) {
@@ -152,6 +155,12 @@ export const partnerships = {
   isPartner(x, y) {
     const [a, b] = _pair(x, y);
     return _partGet.get(a, b) !== undefined;
+  },
+  // Kullanıcının tüm onaylı partnerlerinin hash listesi (yön bağımsız).
+  listFor(hash) {
+    return _partList
+      .all(hash, hash)
+      .map((r) => (r.a_hash === hash ? r.b_hash : r.a_hash));
   },
 };
 
