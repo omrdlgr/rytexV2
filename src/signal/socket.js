@@ -32,6 +32,12 @@ export function setupSocket(httpServer) {
     peers.set(userHash, { socketId: socket.id });
     socket.join(userHash);
 
+    // Çevrimdışıyken gelen bekleyen davetleri teslim et — davet göndermek
+    // artık hedefin o an online olmasını gerektirmiyor (/partner/connect).
+    for (const from of partnerRequests.pendingFor(userHash)) {
+      socket.emit('partner:request', { from });
+    }
+
     // Partner accepted/rejected the connection request.
     // accept (B4/B6): Yalnız gerçekten `to`'dan userHash'e gelmiş bekleyen
     // istek varsa partnership kurulur. Sahte accept ile yetkisiz çift

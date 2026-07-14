@@ -116,11 +116,19 @@ const _reqGet = db.prepare(
 const _reqDelete = db.prepare(
   'DELETE FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
 );
+const _reqPendingFor = db.prepare(
+  'SELECT from_hash FROM partner_requests WHERE to_hash = ? ORDER BY created_at',
+);
 
 export const partnerRequests = {
   // requester → target istek attı
   create(fromHash, toHash) {
     _reqInsert.run(fromHash, toHash, Date.now());
+  },
+  // Bu kullanıcıya bekleyen isteklerin gönderenleri — çevrimdışıyken gelen
+  // davetlerin bağlantı anında teslimi için (socket.js).
+  pendingFor(toHash) {
+    return _reqPendingFor.all(toHash).map((r) => r.from_hash);
   },
   // toHash, fromHash'ten bekleyen istek var mı?
   has(fromHash, toHash) {

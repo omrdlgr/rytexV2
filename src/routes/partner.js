@@ -61,23 +61,24 @@ export default async function partnerRoutes(fastify) {
       return reply.code(409).send({ error: 'already_partners' });
     }
 
-    const partnerPeer = peers.get(partnerHash);
-    if (!partnerPeer?.socketId) {
-      return reply.code(404).send({ error: 'partner_offline' });
-    }
-
     // Bekleyen isteği kalıcı sakla — partner:accept bunu doğrular (B4/B6).
+    // Hedefin ONLINE OLMASI ŞART DEĞİL: çevrimdışıysa istek DB'de bekler,
+    // bir sonraki bağlanışında socket.js connection handler'ı teslim eder.
     partnerRequests.create(requesterHash, partnerHash);
 
-    // Notify partner via Socket.io (io instance attached by setupSocket)
+    // Online ise anında bildir (io instance setupSocket'te eklenir).
+    const partnerPeer = peers.get(partnerHash);
     const io = fastify.io;
-    if (io) {
+    if (io && partnerPeer?.socketId) {
       io.to(partnerPeer.socketId).emit('partner:request', {
         from: requesterHash,
       });
     }
 
-    return reply.send({ status: 'request_sent' });
+    return reply.send({
+      status: 'request_sent',
+      online: !!partnerPeer?.socketId,
+    });
   });
 
   // GET /api/partner/list
