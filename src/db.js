@@ -73,6 +73,16 @@ db.exec(`
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
+
+  -- Opt-in ANONİM döngü uzunluğu istatistiği (ML filo eğitimi; avukat onayı
+  -- 2026-07-15). anon_id kimlikten TÜRETİLMEZ (cihazda rastgele üretilir);
+  -- users tablosuyla hiçbir bağ yok. IP/kimlik SAKLANMAZ. Upsert: aynı cihaz
+  -- güncel verisini eskisinin üzerine yazar, mükerrer satır birikmez.
+  CREATE TABLE IF NOT EXISTS ml_stats (
+    anon_id    TEXT PRIMARY KEY,
+    lengths    TEXT NOT NULL,       -- JSON dizi, ör. [29.0, 31.5, 28.0]
+    updated_at INTEGER NOT NULL
+  );
 `);
 
 const _insert = db.prepare(
@@ -285,6 +295,22 @@ export const sparks = {
   },
   delete(id) {
     _sparkDelete.run(id);
+  },
+};
+
+const _mlStatsUpsert = db.prepare(
+  `INSERT INTO ml_stats (anon_id, lengths, updated_at) VALUES (?, ?, ?)
+   ON CONFLICT(anon_id) DO UPDATE SET lengths = excluded.lengths,
+     updated_at = excluded.updated_at`,
+);
+const _mlStatsCount = db.prepare('SELECT COUNT(*) AS n FROM ml_stats');
+
+export const mlStats = {
+  upsert(anonId, lengths) {
+    _mlStatsUpsert.run(anonId, JSON.stringify(lengths), Date.now());
+  },
+  count() {
+    return _mlStatsCount.get().n;
   },
 };
 
