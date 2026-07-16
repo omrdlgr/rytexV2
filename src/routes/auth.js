@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
-import { userStore } from '../db.js';
+import { userStore, pushTokens } from '../db.js';
 import { signToken, revokeToken, authenticateRequest } from '../token.js';
 import { verifyPhoneToken } from '../firebase.js';
 
@@ -103,6 +103,8 @@ export default async function authRoutes(fastify) {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;
     revokeToken(claims);
+    // Çıkan kullanıcıya artık push gitmesin (cihaz başkasına geçebilir).
+    pushTokens.delete(claims.sub);
     return reply.send({ status: 'logged_out' });
   });
 }

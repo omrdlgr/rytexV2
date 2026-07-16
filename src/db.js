@@ -74,6 +74,17 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  -- FCM push token'ları (SPARK gizli bildirimi, 2026-07-16). Kullanıcı başına
+  -- tek token (son cihaz kazanır). İçerik push'a HİÇ konmaz — yalnız jenerik
+  -- "uygulamaya bak" metni gider; SPARK içeriği uçtan uca şifreli kalır.
+  -- lang: bildirim metninin dili (istemci kayıtta bildirir).
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    phone_hash TEXT PRIMARY KEY,
+    token      TEXT NOT NULL,
+    lang       TEXT NOT NULL DEFAULT 'en',
+    updated_at INTEGER NOT NULL
+  );
+
   -- Opt-in ANONİM döngü uzunluğu istatistiği (ML filo eğitimi; avukat onayı
   -- 2026-07-15). anon_id kimlikten TÜRETİLMEZ (cihazda rastgele üretilir);
   -- users tablosuyla hiçbir bağ yok. IP/kimlik SAKLANMAZ. Upsert: aynı cihaz
@@ -295,6 +306,36 @@ export const sparks = {
   },
   delete(id) {
     _sparkDelete.run(id);
+  },
+};
+
+// ── Push token deposu (SPARK gizli bildirimi) ───────────────────────
+
+const _ptSet = db.prepare(
+  `INSERT INTO push_tokens (phone_hash, token, lang, updated_at) VALUES (?, ?, ?, ?)
+   ON CONFLICT(phone_hash) DO UPDATE SET token = excluded.token,
+     lang = excluded.lang, updated_at = excluded.updated_at`,
+);
+const _ptGet = db.prepare(
+  'SELECT token, lang FROM push_tokens WHERE phone_hash = ?',
+);
+const _ptDelete = db.prepare('DELETE FROM push_tokens WHERE phone_hash = ?');
+const _ptDeleteByToken = db.prepare('DELETE FROM push_tokens WHERE token = ?');
+
+export const pushTokens = {
+  set(phoneHash, token, lang) {
+    _ptSet.run(phoneHash, token, lang || 'en', Date.now());
+  },
+  get(phoneHash) {
+    const row = _ptGet.get(phoneHash);
+    return row ? { token: row.token, lang: row.lang } : undefined;
+  },
+  delete(phoneHash) {
+    _ptDelete.run(phoneHash);
+  },
+  // FCM "token geçersiz" dediğinde temizlik (cihaz app'i silmiş olabilir).
+  deleteByToken(token) {
+    _ptDeleteByToken.run(token);
   },
 };
 

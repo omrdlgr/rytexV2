@@ -1,5 +1,6 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getMessaging } from 'firebase-admin/messaging';
 
 // Firebase Admin — telefon doğrulama ID token'larını doğrular.
 // FIREBASE_SERVICE_ACCOUNT_JSON: servis hesabı JSON'u (string). Yoksa
@@ -23,6 +24,35 @@ function app() {
   } catch (e) {
     console.error('[FIREBASE] init hata:', e.message);
     return null;
+  }
+}
+
+/// FCM push gönderir (jenerik metin — içerik ASLA push'a konmaz, E2E kalır).
+/// Dönüş: 'ok' | 'invalid_token' (kayıt silinmeli) | 'error' | 'no_app'.
+/// channelId 'rytex_cycle': istemci kanalı app açılışında oluşturur — push
+/// ancak token kaydından (yani ilk açılıştan) sonra gelebileceği için kanal
+/// her zaman mevcuttur.
+export async function sendPush(token, { title, body }) {
+  const a = app();
+  if (!a) return 'no_app';
+  try {
+    await getMessaging(a).send({
+      token,
+      notification: { title, body },
+      data: { kind: 'spark' },
+      android: {
+        priority: 'high',
+        notification: { channelId: 'rytex_cycle' },
+      },
+      apns: { payload: { aps: { sound: 'default' } } },
+    });
+    return 'ok';
+  } catch (e) {
+    if (e.code === 'messaging/registration-token-not-registered') {
+      return 'invalid_token';
+    }
+    console.error('[FIREBASE] sendPush hata:', e.code || e.message);
+    return 'error';
   }
 }
 

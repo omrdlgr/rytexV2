@@ -1,5 +1,6 @@
 import { sparks, partnerships } from '../db.js';
 import { authenticateRequest } from '../token.js';
+import { notifyUser } from './push.js';
 
 // SPARK — mahremiyet isteği. Uçtan uca şifreli; sunucu içeriği OKUYAMAZ.
 // Yalnız partner çiftleri arasında. Romantik-kova kuralı istemci tarafında
@@ -30,6 +31,9 @@ export default async function sparkRoutes(fastify) {
       return reply.code(403).send({ error: 'not_partner' });
     }
     const id = sparks.create(claims.sub, to, blob);
+    // Alıcıya gizli push (jenerik metin, içeriksiz) — cevap beklenmez;
+    // push hatası SPARK'ın kendisini etkilemez.
+    notifyUser(to).catch(() => {});
     return reply.code(201).send({ id });
   });
 
@@ -65,6 +69,8 @@ export default async function sparkRoutes(fastify) {
       return reply.code(403).send({ error: 'not_recipient' });
     }
     sparks.respond(id, status, blob ?? null);
+    // Cevap da gönderene gizli push'la duyurulur (aynı jenerik metin).
+    notifyUser(row.from_hash).catch(() => {});
     return reply.send({ status: 'ok' });
   });
 
