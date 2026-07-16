@@ -31,17 +31,26 @@ export default async function sparkRoutes(fastify) {
       return reply.code(403).send({ error: 'not_partner' });
     }
     const id = sparks.create(claims.sub, to, blob);
-    // Alıcıya gizli push (jenerik metin, içeriksiz) — cevap beklenmez;
-    // push hatası SPARK'ın kendisini etkilemez.
-    notifyUser(to).catch(() => {});
-    return reply.code(201).send({ id });
+    // Alıcıya gizli push (jenerik metin, içeriksiz). Sonuç gönderene döner —
+    // UI dürüst beklenti kurar ("bildirim yollandı" / "app'i açınca görecek").
+    // notifyUser asla fırlatmaz; push hatası SPARK'ın kendisini etkilemez.
+    const pushed = await notifyUser(to);
+    return reply.code(201).send({ id, pushed });
   });
 
   // Bana ait SPARK'lar (gönderdiğim + aldığım). GET /api/sparks
   fastify.get('/sparks', async (request, reply) => {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;
-    return reply.send({ sparks: sparks.forUser(claims.sub) });
+    // Tembel süre dolumu: 7 günü geçmiş cevapsızlar 'expired' olur (nötr
+    // üçüncü durum — ne kabul ne ret; bayat talep asılı kalmaz).
+    sparks.expireStale();
+    const list = sparks.forUser(claims.sub);
+    // Bana GELEN'ler bu indirmede cihaza ulaşmış oldu → damgala. Cevap bu
+    // isteğin listesinden SONRA damgalanır: gönderen 'ulaştı'yı bir sonraki
+    // yenilemede görür (alıcı kendi ilk listesinde damgasız görür, sorun değil).
+    sparks.markDelivered(claims.sub);
+    return reply.send({ sparks: list });
   });
 
   // SPARK'a cevap ver (yalnız ALICI). POST /api/spark/respond
@@ -67,6 +76,10 @@ export default async function sparkRoutes(fastify) {
     // Yalnız isteğin ALICISI cevaplayabilir.
     if (row.to_hash !== claims.sub) {
       return reply.code(403).send({ error: 'not_recipient' });
+    }
+    // Süresi dolmuş isteğe cevap verilmez (istemci listeyi tazelesin).
+    if (row.status === 'expired') {
+      return reply.code(409).send({ error: 'expired' });
     }
     sparks.respond(id, status, blob ?? null);
     // Cevap da gönderene gizli push'la duyurulur (aynı jenerik metin).

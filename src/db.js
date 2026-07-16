@@ -265,12 +265,26 @@ export const shares = {
 
 // ── SPARK deposu (uçtan uca şifreli mahremiyet mesajı) ──────────────
 
+// Şema göçü: delivered_at (alıcı CİHAZI indirdi damgası, 2026-07-16 —
+// "görüldü" DEĞİL; sadece "eline geçti" — sessizce-geç mahremiyeti korunur).
+{
+  const cols = db.prepare('PRAGMA table_info(sparks)').all().map((c) => c.name);
+  if (!cols.includes('delivered_at')) {
+    db.exec('ALTER TABLE sparks ADD COLUMN delivered_at INTEGER');
+  }
+}
+
+// Cevapsız SPARK bu süreden sonra 'expired' olur — bayat talep iki tarafta da
+// duygusal yük ("reddedildim" / eskimiş istek garabeti) bırakmasın.
+export const SPARK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
 const _sparkInsert = db.prepare(
   `INSERT INTO sparks (from_hash, to_hash, req_blob, status, created_at, updated_at)
    VALUES (?, ?, ?, 'pending', ?, ?)`,
 );
 const _sparkForUser = db.prepare(
-  `SELECT id, from_hash, to_hash, req_blob, status, resp_blob, created_at, updated_at
+  `SELECT id, from_hash, to_hash, req_blob, status, resp_blob, created_at,
+          updated_at, delivered_at
    FROM sparks WHERE from_hash = ? OR to_hash = ? ORDER BY updated_at DESC LIMIT 100`,
 );
 const _sparkGet = db.prepare('SELECT * FROM sparks WHERE id = ?');
@@ -278,6 +292,13 @@ const _sparkRespond = db.prepare(
   `UPDATE sparks SET status = ?, resp_blob = ?, updated_at = ? WHERE id = ?`,
 );
 const _sparkDelete = db.prepare('DELETE FROM sparks WHERE id = ?');
+const _sparkMarkDelivered = db.prepare(
+  `UPDATE sparks SET delivered_at = ? WHERE to_hash = ? AND delivered_at IS NULL`,
+);
+const _sparkExpire = db.prepare(
+  `UPDATE sparks SET status = 'expired', updated_at = ?
+   WHERE status = 'pending' AND created_at < ?`,
+);
 
 export const sparks = {
   create(fromHash, toHash, reqBlob) {
@@ -296,7 +317,17 @@ export const sparks = {
       respBlob: r.resp_blob ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
+      deliveredAt: r.delivered_at ?? null,
     }));
+  },
+  // Alıcının cihazına inen SPARK'ları damgala ("gördü" değil, "eline geçti").
+  markDelivered(toHash) {
+    _sparkMarkDelivered.run(Date.now(), toHash);
+  },
+  // Cevapsız + TTL'i geçmiş istekleri 'expired' yap (tembel; GET'te çağrılır).
+  expireStale() {
+    const now = Date.now();
+    _sparkExpire.run(now, now - SPARK_TTL_MS);
   },
   get(id) {
     return _sparkGet.get(id);

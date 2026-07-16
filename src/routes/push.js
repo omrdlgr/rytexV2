@@ -22,15 +22,23 @@ const PUSH_BODY = {
   ru: 'У тебя новое уведомление.',
 };
 
-/// [toHash] kullanıcısına jenerik gizli bildirim gönderir (fire-and-forget —
-/// çağıran await ETMEZ, push başarısızlığı API cevabını geciktirmez/bozamaz).
-/// Token kayıtlı değilse sessizce geçer (kullanıcı push istememiş olabilir).
+/// [toHash] kullanıcısına jenerik gizli bildirim gönderir. Dönüş: FCM kabul
+/// etti mi (true) — gönderene dürüst beklenti kurmak için (/spark cevabındaki
+/// 'pushed'). ASLA fırlatmaz; token yoksa/başarısızsa false.
 export async function notifyUser(toHash) {
-  const rec = pushTokens.get(toHash);
-  if (!rec) return;
-  const body = PUSH_BODY[rec.lang] || PUSH_BODY.en;
-  const res = await sendPush(rec.token, { title: 'RYTEX', body });
-  if (res === 'invalid_token') pushTokens.deleteByToken(rec.token);
+  try {
+    const rec = pushTokens.get(toHash);
+    if (!rec) return false;
+    const body = PUSH_BODY[rec.lang] || PUSH_BODY.en;
+    const res = await sendPush(rec.token, { title: 'RYTEX', body });
+    if (res === 'invalid_token') {
+      pushTokens.deleteByToken(rec.token);
+      return false;
+    }
+    return res === 'ok';
+  } catch {
+    return false;
+  }
 }
 
 export default async function pushRoutes(fastify) {
