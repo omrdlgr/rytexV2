@@ -1,4 +1,4 @@
-import { partnerRequests, partnerships } from '../db.js';
+import { partnerRequests, partnerships, dissolvePartnership } from '../db.js';
 import { authenticateRequest } from '../token.js';
 
 // In-memory store: phoneHash → { socketId, connectedTo }
@@ -79,6 +79,41 @@ export default async function partnerRoutes(fastify) {
       status: 'request_sent',
       online: !!partnerPeer?.socketId,
     });
+  });
+
+  // POST /api/partner/disconnect
+  // Body: { partnerHash: string }
+  // Partnerliği iki taraflı çözer (partnership + istekler + shares + sparks).
+  // Idempotent: partnership yoksa da 200 döner (istemci tekrar-deneme kuyruğu
+  // güvenle çalışsın). Karşı taraf online ise anında 'partner:removed' alır;
+  // offline ise bir sonraki bağlanışında /partner/list eşitlemesi yakalar.
+  fastify.post('/partner/disconnect', {
+    schema: {
+      body: {
+        type: 'object',
+        required: ['partnerHash'],
+        properties: {
+          partnerHash: { type: 'string', minLength: 8 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const claims = authenticateRequest(request, reply);
+    if (!claims) return;
+
+    const userHash = claims.sub;
+    const { partnerHash } = request.body;
+
+    const existed = partnerships.isPartner(userHash, partnerHash);
+    dissolvePartnership(userHash, partnerHash);
+
+    const partnerPeer = peers.get(partnerHash);
+    const io = fastify.io;
+    if (io && partnerPeer?.socketId) {
+      io.to(partnerPeer.socketId).emit('partner:removed', { from: userHash });
+    }
+
+    return reply.send({ status: 'disconnected', existed });
   });
 
   // GET /api/partner/list

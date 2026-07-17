@@ -176,6 +176,22 @@ const _partList = db.prepare(
   'SELECT a_hash, b_hash FROM partnerships WHERE a_hash = ? OR b_hash = ?',
 );
 
+const _partDelete = db.prepare(
+  'DELETE FROM partnerships WHERE a_hash = ? AND b_hash = ?',
+);
+const _reqDeletePair = db.prepare(
+  `DELETE FROM partner_requests
+   WHERE (from_hash = ? AND to_hash = ?) OR (from_hash = ? AND to_hash = ?)`,
+);
+const _shDeletePair = db.prepare(
+  `DELETE FROM shares
+   WHERE (from_hash = ? AND to_hash = ?) OR (from_hash = ? AND to_hash = ?)`,
+);
+const _sparkDeletePair = db.prepare(
+  `DELETE FROM sparks
+   WHERE (from_hash = ? AND to_hash = ?) OR (from_hash = ? AND to_hash = ?)`,
+);
+
 export const partnerships = {
   add(x, y) {
     const [a, b] = _pair(x, y);
@@ -192,6 +208,19 @@ export const partnerships = {
       .map((r) => (r.a_hash === hash ? r.b_hash : r.a_hash));
   },
 };
+
+// Partnerliği İKİ TARAFLI ve kalıcı olarak çözer: partnership satırı +
+// çifte ait bekleyen istekler + şifreli paylaşım kutuları + SPARK'lar
+// (her iki yönde) tek transaction'da silinir. Idempotent — partnership
+// yoksa da kalıntıları temizler. "Sahip siler → erişim anında kesilir"
+// vaadinin sunucu ayağı; yoksa shares/sparks sunucuda yaşamaya devam eder.
+export const dissolvePartnership = db.transaction((x, y) => {
+  const [a, b] = _pair(x, y);
+  _partDelete.run(a, b);
+  _reqDeletePair.run(x, y, y, x);
+  _shDeletePair.run(x, y, y, x);
+  _sparkDeletePair.run(x, y, y, x);
+});
 
 // ── İptal edilmiş token deposu (JWT revocation) ─────────────────────
 
