@@ -415,4 +415,37 @@ export const mlStats = {
   },
 };
 
+// ── Hesap silme (Apple 5.1.1(v): uygulama içinden hesap silme zorunlu) ──
+
+const _accReqDelete = db.prepare(
+  'DELETE FROM partner_requests WHERE from_hash = ? OR to_hash = ?',
+);
+const _accPartDelete = db.prepare(
+  'DELETE FROM partnerships WHERE a_hash = ? OR b_hash = ?',
+);
+const _accShDelete = db.prepare(
+  'DELETE FROM shares WHERE from_hash = ? OR to_hash = ?',
+);
+const _accSparkDelete = db.prepare(
+  'DELETE FROM sparks WHERE from_hash = ? OR to_hash = ?',
+);
+const _accPkDelete = db.prepare('DELETE FROM public_keys WHERE phone_hash = ?');
+const _accUserDelete = db.prepare('DELETE FROM users WHERE phone_hash = ?');
+
+// Kullanıcıya ait TÜM sunucu kaydını tek transaction'da siler: kullanıcı
+// satırı, her yöndeki bekleyen istekler, partnerlikler, şifreli paylaşım
+// kutuları, SPARK'lar, ortak anahtar ve push jetonu.
+// ml_stats'a DOKUNULMAZ — orada anon_id rastgeledir, phoneHash ile ilişkisi
+// yoktur (politika §14: gönderilmiş anonim sayılar geri bağlanamaz).
+// Idempotent: kayıt yoksa da sessizce geçer.
+export const deleteAccount = db.transaction((hash) => {
+  _accReqDelete.run(hash, hash);
+  _accPartDelete.run(hash, hash);
+  _accShDelete.run(hash, hash);
+  _accSparkDelete.run(hash, hash);
+  _accPkDelete.run(hash);
+  _ptDelete.run(hash);
+  _accUserDelete.run(hash);
+});
+
 export default db;

@@ -23,7 +23,8 @@ const fastify = Fastify({ logger: true, trustProxy: true });
 // dev'de '*'. Açık '*' default'u kaldırıldı (B5).
 await fastify.register(cors, {
   origin: CORS_ORIGIN,
-  methods: ['GET', 'POST'],
+  // DELETE: hesap silme (DELETE /api/account, Apple 5.1.1(v)).
+  methods: ['GET', 'POST', 'DELETE'],
 });
 
 // Global rate limit — IP başına dakikada 100 istek (genel kötüye kullanım)
