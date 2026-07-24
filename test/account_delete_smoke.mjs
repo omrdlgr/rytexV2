@@ -114,7 +114,7 @@ ok("silinen hesabın token'ı 401", afterToken.status === 401, JSON.stringify(af
 // 9. Ortak anahtar, partnerlik, paylaşım kutusu gitti
 // Silme sonrası B artık partner değil → /keys/:hash 403 döner (anahtarın
 // gerçekten gittiğini DB'den doğruluyoruz).
-const dbCheck = await import('./src/db.js');
+const dbCheck = await import('../src/db.js');
 const leftovers = {
   user: dbCheck.userStore.has(A.hash),
   key: dbCheck.publicKeys.get(A.hash) !== undefined,
