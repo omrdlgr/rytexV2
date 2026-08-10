@@ -1,5 +1,11 @@
-import { partnerRequests, partnerships, dissolvePartnership } from '../db.js';
+import {
+  partnerRequests,
+  partnerships,
+  dissolvePartnership,
+  entitlements,
+} from '../db.js';
 import { authenticateRequest } from '../token.js';
+import { PARTNER_LIMIT, ENFORCE_PREMIUM } from '../config.js';
 
 // In-memory store: phoneHash → { socketId, connectedTo }
 // Replace with Redis/DB for multi-instance deployments
@@ -59,6 +65,29 @@ export default async function partnerRoutes(fastify) {
     // Zaten partnerse tekrar istek/spam üretme (B6).
     if (partnerships.isPartner(requesterHash, partnerHash)) {
       return reply.code(409).send({ error: 'already_partners' });
+    }
+
+    // ── Paylaşım sınırı (karar 2026-07-10) ────────────────────────────
+    // Kötüye kullanım freni: bir aboneliğin arkadaş grubuna "ortak hesap"
+    // olmasını engeller. SUNUCUDA zorlanır — istemcide sayı tutmak süstür.
+    // Yalnız DAVET EDEN sayılır; izleyici tarafı ücretsiz ve sınırsızdır
+    // (model: paylaşımı hep sahip başlatır).
+    if (partnerships.countFor(requesterHash) >= PARTNER_LIMIT) {
+      return reply
+        .code(409)
+        .send({ error: 'partner_limit_reached', limit: PARTNER_LIMIT });
+    }
+
+    // ── Premium şartı ─────────────────────────────────────────────────
+    // ⚠️ VARSAYILAN KAPALI. 14 günlük deneme ve grandfather kohortu
+    // İSTEMCİDE hesaplanıyor (yerel damga + Apple makbuzundaki
+    // originalApplicationVersion); sunucunun o bilgisi yok. Bugün açarsak
+    // deneme kullanıcısını ve erken gelen kohortu kilitleriz.
+    // Açmadan önce: backend, hakkı olmayan kullanıcının
+    // originalApplicationVersion'ını RevenueCat API'sinden sorup kohorttaysa
+    // promotional hak tanımalı (Apple imzalı veri, istemci yalan söyleyemez).
+    if (ENFORCE_PREMIUM && !entitlements.isActive(requesterHash)) {
+      return reply.code(402).send({ error: 'premium_required' });
     }
 
     // Bekleyen isteği kalıcı sakla — partner:accept bunu doğrular (B4/B6).

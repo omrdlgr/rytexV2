@@ -94,6 +94,19 @@ db.exec(`
     lengths    TEXT NOT NULL,       -- JSON dizi, ör. [29.0, 31.5, 28.0]
     updated_at INTEGER NOT NULL
   );
+
+  -- Abonelik hakkı. TEK KAYNAK RevenueCat webhook'u; istemci buraya
+  -- yazamaz. phone_hash = RevenueCat appUserID (giriş yapmış kullanıcıda
+  -- phoneHash). expires_at NULL = süresiz (ömür boyu/hediye hak).
+  CREATE TABLE IF NOT EXISTS entitlements (
+    phone_hash TEXT PRIMARY KEY,
+    active     INTEGER NOT NULL,     -- 0/1, expires_at'ten türetilir
+    expires_at INTEGER,              -- ms epoch, NULL = süresiz
+    product_id TEXT,
+    source     TEXT,                 -- 'store' | 'promotional'
+    event_type TEXT,                 -- son RC olayı (teşhis için)
+    updated_at INTEGER NOT NULL
+  );
 `);
 
 const _insert = db.prepare(
@@ -176,6 +189,9 @@ const _partList = db.prepare(
   'SELECT a_hash, b_hash FROM partnerships WHERE a_hash = ? OR b_hash = ?',
 );
 
+const _partCount = db.prepare(
+  'SELECT COUNT(*) AS n FROM partnerships WHERE a_hash = ? OR b_hash = ?',
+);
 const _partDelete = db.prepare(
   'DELETE FROM partnerships WHERE a_hash = ? AND b_hash = ?',
 );
@@ -206,6 +222,60 @@ export const partnerships = {
     return _partList
       .all(hash, hash)
       .map((r) => (r.a_hash === hash ? r.b_hash : r.a_hash));
+  },
+  // Sınır kontrolü için sayı — listeyi kurup uzunluğuna bakmaktan ucuz.
+  countFor(hash) {
+    return _partCount.get(hash, hash).n;
+  },
+};
+
+// ── Abonelik hakkı (RevenueCat webhook'u yazar) ─────────────────────
+const _entUpsert = db.prepare(
+  `INSERT INTO entitlements
+     (phone_hash, active, expires_at, product_id, source, event_type, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?)
+   ON CONFLICT(phone_hash) DO UPDATE SET
+     active     = excluded.active,
+     expires_at = excluded.expires_at,
+     product_id = excluded.product_id,
+     source     = excluded.source,
+     event_type = excluded.event_type,
+     updated_at = excluded.updated_at`,
+);
+const _entGet = db.prepare('SELECT * FROM entitlements WHERE phone_hash = ?');
+
+export const entitlements = {
+  upsert({ phoneHash, active, expiresAt, productId, source, eventType }) {
+    _entUpsert.run(
+      phoneHash,
+      active ? 1 : 0,
+      expiresAt ?? null,
+      productId ?? null,
+      source ?? null,
+      eventType ?? null,
+      Date.now(),
+    );
+  },
+  get(phoneHash) {
+    const r = _entGet.get(phoneHash);
+    if (!r) return undefined;
+    return {
+      phoneHash: r.phone_hash,
+      active: r.active === 1,
+      expiresAt: r.expires_at,
+      productId: r.product_id,
+      source: r.source,
+      eventType: r.event_type,
+      updatedAt: r.updated_at,
+    };
+  },
+  /// Kayıtlı hak ŞU AN geçerli mi. `active` bayrağı olaydan gelir ama
+  /// süre dolmuşsa webhook gecikse bile burada kapanır — zamanla kendini
+  /// düzelten kontrol.
+  isActive(phoneHash, now = Date.now()) {
+    const e = this.get(phoneHash);
+    if (!e || !e.active) return false;
+    return e.expiresAt == null || e.expiresAt > now;
   },
 };
 

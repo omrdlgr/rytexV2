@@ -9,6 +9,7 @@ import shareRoutes from './routes/share.js';
 import sparkRoutes from './routes/spark.js';
 import statsRoutes from './routes/stats.js';
 import pushRoutes from './routes/push.js';
+import revenuecatRoutes from './routes/revenuecat.js';
 import { CORS_ORIGIN } from './config.js';
 
 const PORT = process.env.PORT || 3000;
@@ -46,6 +47,7 @@ fastify.register(shareRoutes, { prefix: '/api' });
 fastify.register(sparkRoutes, { prefix: '/api' });
 fastify.register(statsRoutes, { prefix: '/api' });
 fastify.register(pushRoutes, { prefix: '/api' });
+fastify.register(revenuecatRoutes, { prefix: '/api' });
 
 fastify.get('/health', async () => ({ status: 'ok' }));
 
