@@ -18,6 +18,12 @@ const ANON_PREFIX = '$RCAnonymousID:';
 /// — kullanıcı ödediği dönemin sonuna kadar kullanır; RC bunu expiration
 /// alanında zaten doğru veriyor.
 export function decideActive(event, now = Date.now()) {
+  // RC panelindeki "Send test event" sentetik bir olay üretir: uydurma
+  // app_user_id (düz UUID), sahte ürün. Şu an entitlement_ids boş geldiği
+  // için zaten yutuluyor ama RC dolu bir TEST olayı gönderirse veritabanına
+  // çöp satır yazardık — tipi açıkça eliyoruz.
+  if (event?.type === 'TEST') return null;
+
   const ids = event?.entitlement_ids;
   const mentionsPremium = Array.isArray(ids)
     ? ids.includes(ENTITLEMENT_ID)

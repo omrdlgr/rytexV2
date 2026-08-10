@@ -133,6 +133,18 @@ async function main() {
       headers: { authorization: RC_SECRET },
     });
     ok('app_user_id yoksa 400', bad.status === 400, `→ ${bad.status}`);
+
+    // RC panelindeki "Send test event" sentetik olay üretir (uydurma
+    // app_user_id, sahte ürün). Dolu entitlement ile gelse bile çöp satır
+    // yazılmamalı.
+    const testEv = await req('POST', '/api/revenuecat/webhook', {
+      body: rcEvent(hash('testev'), { type: 'TEST', entitlement_ids: ['premium'] }),
+      headers: { authorization: RC_SECRET },
+    });
+    ok('TEST olayı dolu entitlement ile de yutulur',
+      testEv.status === 200 &&
+        testEv.json?.status === 'ignored_other_entitlement',
+      JSON.stringify(testEv.json));
   }
 
   console.log(`\n── Partner sınırı (sunucuda, limit=${LIMIT})`);
