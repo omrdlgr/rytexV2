@@ -304,7 +304,13 @@ export const entitlements = {
   isActive(phoneHash, now = Date.now()) {
     const e = this.get(phoneHash);
     if (!e || !e.active) return false;
-    if (e.environment === 'SANDBOX' && !ALLOW_SANDBOX_ENTITLEMENTS) return false;
+    // Harf durumu NORMALIZE edilir: webhook 'SANDBOX', REST API 'sandbox'
+    // gönderiyor. Birebir karşılaştırma 2026-08-12'de sandbox hakkını
+    // üretim saydıracaktı — kapı sessizce açılırdı.
+    const env = typeof e.environment === 'string'
+      ? e.environment.toUpperCase()
+      : null;
+    if (env === 'SANDBOX' && !ALLOW_SANDBOX_ENTITLEMENTS) return false;
     return e.expiresAt == null || e.expiresAt > now;
   },
 };
