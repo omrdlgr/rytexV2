@@ -128,11 +128,62 @@ async function main() {
       other.status === 200 && other.json?.status === 'ignored_other_entitlement',
       JSON.stringify(other.json));
 
-    const bad = await req('POST', '/api/revenuecat/webhook', {
-      body: { event: { type: 'INITIAL_PURCHASE' } },
+    // SAHA HATASI 2026-08-11: app_user_id'siz olaya 400 donuyorduk; RC
+    // birkac kez deneyip pes ediyor ve olay SESSIZCE kayboluyordu.
+    // Artik 200 + kayit: olay gorunur kalir, RC ugrasmayi birakir.
+    const noUser = await req('POST', '/api/revenuecat/webhook', {
+      body: { event: { type: 'RENEWAL', entitlement_ids: ['premium'] } },
       headers: { authorization: RC_SECRET },
     });
-    ok('app_user_id yoksa 400', bad.status === 400, `→ ${bad.status}`);
+    ok('app_user_id yoksa 200 + ignored_no_user (RC tekrar denemesin)',
+      noUser.status === 200 && noUser.json?.status === 'ignored_no_user',
+      `→ ${noUser.status} ${JSON.stringify(noUser.json)}`);
+
+    const bad = await req('POST', '/api/revenuecat/webhook', {
+      body: { notAnEvent: true },
+      headers: { authorization: RC_SECRET },
+    });
+    ok('event bloğu hiç yoksa 400', bad.status === 400, `→ ${bad.status}`);
+
+    // TRANSFER: app_user_id NULL gelir, taraflar transferred_from/to'da.
+    // Uygulama silinip kurulunca RC yeni anonim kimlik uretiyor ve StoreKit
+    // geri yukleyince transfer tetikleniyor — nadir DEGIL.
+    const transferUser = hash('transferred');
+    await req('POST', '/api/revenuecat/webhook', {
+      body: rcEvent(transferUser),
+      headers: { authorization: RC_SECRET },
+    });
+    const transfer = await req('POST', '/api/revenuecat/webhook', {
+      body: {
+        event: {
+          type: 'TRANSFER',
+          app_user_id: null,
+          transferred_from: [transferUser],
+          transferred_to: [hash('yenikimlik')],
+        },
+      },
+      headers: { authorization: RC_SECRET },
+    });
+    ok('TRANSFER işlenir, eski kimlikte hak KAPANIR',
+      transfer.status === 200 &&
+        transfer.json?.status === 'transfer_handled' &&
+        transfer.json?.closed === 1,
+      `→ ${transfer.status} ${JSON.stringify(transfer.json)}`);
+
+    const transferAnon = await req('POST', '/api/revenuecat/webhook', {
+      body: {
+        event: {
+          type: 'TRANSFER',
+          app_user_id: null,
+          transferred_from: ['$RCAnonymousID:eski'],
+          transferred_to: [hash('yeni2')],
+        },
+      },
+      headers: { authorization: RC_SECRET },
+    });
+    ok('TRANSFER: anonim kaynak atlanır (yazacak satır yok)',
+      transferAnon.status === 200 && transferAnon.json?.closed === 0,
+      JSON.stringify(transferAnon.json));
 
     // RC panelindeki "Send test event" sentetik olay üretir (uydurma
     // app_user_id, sahte ürün). Dolu entitlement ile gelse bile çöp satır

@@ -64,8 +64,50 @@ export default async function revenuecatRoutes(fastify) {
     }
 
     const event = request.body?.event;
-    if (!event || typeof event.app_user_id !== 'string') {
+    if (!event || typeof event !== 'object') {
       return reply.code(400).send({ error: 'bad_event' });
+    }
+
+    // TRANSFER: hak bir kimlikten digerine tasindi. Bu olayda `app_user_id`
+    // NULL gelir; taraflar `transferred_from` / `transferred_to` dizilerinde.
+    //
+    // SAHA HATASI 2026-08-11: bu olay `bad_event` sayilip 400 doniyordu.
+    // Sonucu sessiz ve kotu: RC birkac kez deneyip pes eder, ESKI kimlikte
+    // hak acik kalir, YENI kimlikte acilmaz — abonelik sunucuda yanlis
+    // kiside gorunur. Uygulama silinip yeniden kurulunca RC anonim kimlik
+    // uretiyor ve StoreKit satin almayi geri yukleyince transfer tetikleniyor,
+    // yani NADIR degil.
+    if (event.type === 'TRANSFER') {
+      const from = Array.isArray(event.transferred_from)
+        ? event.transferred_from
+        : [];
+      let closed = 0;
+      for (const id of from) {
+        if (typeof id !== 'string' || id.startsWith(ANON_PREFIX)) continue;
+        // Hak artik bu kimlikte DEGIL. Bitis/urun bilgisi tasinmadigi icin
+        // yalnizca kapatiyoruz; yeni sahibin hakki kendi olayiyla gelir.
+        entitlements.upsert({
+          phoneHash: id,
+          active: false,
+          expiresAt: null,
+          productId: null,
+          source: null,
+          eventType: 'TRANSFER',
+        });
+        closed++;
+      }
+      request.log.info({ closed }, 'RevenueCat TRANSFER islendi');
+      return reply.send({ status: 'transfer_handled', closed });
+    }
+
+    if (typeof event.app_user_id !== 'string') {
+      // Bilmedigimiz bir sekil. 400 dondurmek RC'yi tekrar tekrar denemeye
+      // sokar; 200 + kayit birakmak dogru — olay kaybolmaz, gorunur olur.
+      request.log.warn(
+        { type: event.type, keys: Object.keys(event).slice(0, 12) },
+        'RevenueCat olayinda app_user_id yok',
+      );
+      return reply.send({ status: 'ignored_no_user' });
     }
 
     const appUserId = event.app_user_id;
