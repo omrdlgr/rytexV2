@@ -1,11 +1,8 @@
-import bcrypt from 'bcrypt';
 import { createHash } from 'node:crypto';
 import { userStore, pushTokens, partnerships, deleteAccount } from '../db.js';
 import { signToken, revokeToken, authenticateRequest } from '../token.js';
 import { verifyPhoneToken } from '../firebase.js';
 import { peers } from './partner.js';
-
-const SALT_ROUNDS = 12;
 
 // Frontend phoneHashOf ile AYNI: SHA-256(E.164 numara), hex.
 function phoneHashOf(phoneE164) {
@@ -13,70 +10,22 @@ function phoneHashOf(phoneE164) {
 }
 
 export default async function authRoutes(fastify) {
-  // POST /api/register
-  // Body: { phoneHash: string, password: string }
-  fastify.post('/register', {
-    // Brute-force/spam koruması: IP başına dakikada 5 deneme
-    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
-    schema: {
-      body: {
-        type: 'object',
-        required: ['phoneHash', 'password'],
-        properties: {
-          phoneHash: { type: 'string', minLength: 8 },
-          password: { type: 'string', minLength: 6 },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const { phoneHash, password } = request.body;
-
-    if (userStore.has(phoneHash)) {
-      return reply.code(409).send({ error: 'already_registered' });
-    }
-
-    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-    userStore.create(phoneHash, passwordHash);
-
-    const token = signToken(phoneHash);
-    return reply.code(201).send({ token });
-  });
-
-  // POST /api/login
-  // Body: { phoneHash: string, password: string }
-  fastify.post('/login', {
-    // Brute-force koruması: IP başına dakikada 5 deneme
-    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
-    schema: {
-      body: {
-        type: 'object',
-        required: ['phoneHash', 'password'],
-        properties: {
-          // minLength register ile tutarlı (B7) — şema doğrulama simetrisi
-          phoneHash: { type: 'string', minLength: 8 },
-          password: { type: 'string' },
-        },
-      },
-    },
-  }, async (request, reply) => {
-    const { phoneHash, password } = request.body;
-
-    const user = userStore.get(phoneHash);
-    if (!user) {
-      return reply.code(401).send({ error: 'invalid_credentials' });
-    }
-
-    const match = await bcrypt.compare(password, user.passwordHash);
-    if (!match) {
-      return reply.code(401).send({ error: 'invalid_credentials' });
-    }
-
-    const token = signToken(phoneHash);
-    return reply.send({ token });
-  });
-
-  // POST /api/verify-phone — Firebase telefon doğrulaması.
-  // Body: { idToken }  → Firebase ID token doğrulanır, phone_number'dan
+  // ⚠️ POST /register ve POST /login KALDIRILDI (2026-08-11, güvenlik).
+  //
+  // AÇIK: /register yalnız {phoneHash, password} istiyordu — telefonun
+  // başvurana ait olduğuna dair HİÇBİR kanıt aramıyordu — ve o phoneHash
+  // için geçerli JWT dönüyordu. phoneHash = SHA-256(E.164) ve cep numarası
+  // uzayı küçük olduğu için saldırgan herkesin hash'ini önceden
+  // hesaplayabilir. Kurban henüz kayıtlı değilse saldırgan onun kimliğiyle
+  // token alır, ardından PUT /keys ile KENDİ açık anahtarını kurbanınmış
+  // gibi yayınlar; kurbanın partneri veri paylaştığında şifreleme
+  // saldırganın anahtarıyla yapılır ve sağlık verisi çözülebilir.
+  // Uçtan uca şifrelemenin tüm garantisi JWT'deki `sub`'ın telefon
+  // sahipliğini kanıtlamasına dayanıyordu; bu uç o varsayımı kırıyordu.
+  //
+  // Uçlar ZATEN ÖLÜ KODDU: istemci hiçbir ekrandan çağırmıyor, kimlik
+  // doğrulama tamamen /verify-phone (Firebase ID token) üzerinden.
+  // Kaldırılması bcrypt bağımlılığını da düşürdü (tar CRITICAL zinciri).
   // phoneHash türetilir, kullanıcı yoksa oluşturulur, bizim JWT döner.
   fastify.post('/verify-phone', {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },

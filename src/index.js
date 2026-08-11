@@ -36,6 +36,30 @@ await fastify.register(rateLimit, {
   timeWindow: '1 minute',
 });
 
+// Fastify 5, `content-type: application/json` olup GÖVDESİ BOŞ istekleri
+// reddediyor (FST_ERR_CTP_EMPTY_JSON_BODY); Fastify 4 tolere ediyordu.
+//
+// ⚠️ İstemci `/logout` ve `DELETE /account`'u GÖVDESİZ çağırıyor ve o
+// sürümler KULLANICILARIN ELİNDE canlı. Sunucu tolere etmezse çıkış yapma
+// ve hesap silme (Apple 5.1.1(v) zorunluluğu) kırılır — üstelik yalnız
+// güncellemeyenlerde, yani en görünmez şekilde. Fastify 4 davranışı burada
+// geri veriliyor: boş gövde = gövde yok.
+fastify.addContentTypeParser(
+  'application/json',
+  { parseAs: 'string' },
+  (_req, body, done) => {
+    if (body === undefined || body === null || body === '') {
+      return done(null, undefined);
+    }
+    try {
+      done(null, JSON.parse(body));
+    } catch (err) {
+      err.statusCode = 400;
+      done(err);
+    }
+  },
+);
+
 // 2. Socket.io + decorator — must happen before ready() / listen()
 const io = setupSocket(fastify.server);
 fastify.decorate('io', io);

@@ -127,9 +127,10 @@ export const userStore = {
       createdAt: row.created_at,
     };
   },
-  create(phoneHash, passwordHash) {
-    _insert.run(phoneHash, passwordHash, Date.now());
-  },
+  // NOT: sifreli kayit (create) 2026-08-11'de KALDIRILDI — /register ucu
+  // telefon sahipligini kanitlamadan JWT veriyordu (bkz. routes/auth.js).
+  // Kullanici artik yalniz ensurePhone ile, Firebase ID token dogrulandiktan
+  // sonra olusur. password_hash sutunu eski satirlar icin duruyor.
   // Telefon doğrulamalı kullanıcı (şifresiz). Yoksa oluşturur.
   ensurePhone(phoneHash) {
     if (_get.get(phoneHash) === undefined) {

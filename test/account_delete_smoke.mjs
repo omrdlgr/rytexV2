@@ -1,5 +1,18 @@
 // DELETE /api/account smoke — geçici DB + gerçek sunucu üzerinde.
 import { io as ioClient } from 'socket.io-client';
+import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
+
+// /register ve /login 2026-08-11'de GUVENLIK gerekcesiyle kaldirildi
+// (telefon sahipligi kanitlanmadan JWT veriyorlardi). Test kullanicisinin
+// token'i artik yerelde imzalanir — sunucuyla AYNI JWT_SECRET gerekir.
+function mintToken(phoneHash) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET gerekli (sunucuyla ayni olmali)');
+  return jwt.sign({ sub: phoneHash, jti: randomUUID() }, secret, {
+    expiresIn: '1h',
+  });
+}
 
 const BASE = process.env.BASE || 'http://127.0.0.1:3999';
 let pass = 0;
@@ -54,12 +67,12 @@ const health = await req('GET', '/health');
 ok('health 200', health.status === 200, JSON.stringify(health));
 
 // 1. İki kullanıcı
-const regA = await req('POST', '/api/register', { body: { phoneHash: A.hash, password: A.pw } });
-const regB = await req('POST', '/api/register', { body: { phoneHash: B.hash, password: B.pw } });
-ok('A kayıt oldu', regA.status === 201 && !!regA.json?.token, JSON.stringify(regA));
-ok('B kayıt oldu', regB.status === 201 && !!regB.json?.token, JSON.stringify(regB));
-A.token = regA.json.token;
-B.token = regB.json.token;
+A.token = mintToken(A.hash);
+B.token = mintToken(B.hash);
+ok('A token üretildi', !!A.token);
+ok('B token üretildi', !!B.token);
+// Kullanıcı satırı sunucuda ilk yetkili istekte gerekmiyor; partnerlik ve
+// paylaşım akışı hash üzerinden ilerliyor.
 
 // 2. Ortak anahtarlar (doğrulaması partnerlik kurulduktan sonra — /keys/:hash
 //    yalnız gerçek partnere açık)
@@ -136,15 +149,15 @@ const sharesAfter = await req('GET', '/api/shares', { token: B.token });
 ok('şifreli kutu silindi', (sharesAfter.json?.shares || []).length === 0, JSON.stringify(sharesAfter));
 
 // 10. Aynı numara yeniden kayıt olabilir
-const reReg = await req('POST', '/api/register', { body: { phoneHash: A.hash, password: A.pw } });
-ok('aynı numara yeniden kayıt olabiliyor', reReg.status === 201, JSON.stringify(reReg));
+const reToken = mintToken(A.hash);
+ok('aynı numara yeniden token alabiliyor', !!reToken);
 
 // 11. Yeniden bağlanma 409 vermez (bayat partnership kalmadı)
-const reconn = await req('POST', '/api/partner/connect', { token: reReg.json?.token, body: { partnerHash: B.hash } });
+const reconn = await req('POST', '/api/partner/connect', { token: reToken, body: { partnerHash: B.hash } });
 ok('yeniden bağlanma 409 vermiyor', reconn.status === 200, JSON.stringify(reconn));
 
 // 12. Idempotent: tekrar sil → 200
-const del2 = await req('DELETE', '/api/account', { token: reReg.json?.token });
+const del2 = await req('DELETE', '/api/account', { token: reToken });
 ok('ikinci silme de 200 (idempotent)', del2.status === 200, JSON.stringify(del2));
 
 sockA.close();

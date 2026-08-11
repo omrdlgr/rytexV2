@@ -7,6 +7,9 @@
 //
 // Çalıştırma:
 //   RC_SECRET=test-secret PARTNER_LIMIT=2 JWT_SECRET=... node test/premium_smoke.mjs
+import jwt from 'jsonwebtoken';
+import { randomUUID } from 'node:crypto';
+
 const BASE = process.env.BASE || 'http://127.0.0.1:3999';
 const RC_SECRET = process.env.REVENUECAT_WEBHOOK_SECRET || 'test-secret';
 const LIMIT = Number(process.env.PARTNER_LIMIT || 2);
@@ -45,15 +48,17 @@ async function req(method, path, { token, body, headers = {} } = {}) {
 
 const hash = (n) => `smoke_premium_${n}_${Date.now()}`;
 
-async function login(phoneHash) {
-  const r = await req('POST', '/api/register', {
-    body: { phoneHash, password: 'Test1234!' },
+// /register ve /login 2026-08-11'de GUVENLIK gerekcesiyle kaldirildi
+// (telefon sahipligi kanitlanmadan JWT veriyorlardi). Test kullanicisi
+// artik token'i yerelde imzalayarak uretilir — sunucuyla AYNI JWT_SECRET.
+// Not: bu, /verify-phone'un yaptigi isin test karsiligidir; gercek akista
+// sub'i sunucu, dogrulanmis Firebase token'indan turetir.
+function login(phoneHash) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error('JWT_SECRET gerekli (sunucuyla ayni olmali)');
+  return jwt.sign({ sub: phoneHash, jti: randomUUID() }, secret, {
+    expiresIn: '1h',
   });
-  if (r.status === 200 || r.status === 201) return r.json.token;
-  const l = await req('POST', '/api/login', {
-    body: { phoneHash, password: 'Test1234!' },
-  });
-  return l.json?.token;
 }
 
 function rcEvent(appUserId, over = {}) {
@@ -201,14 +206,14 @@ async function main() {
   console.log(`\n── Partner sınırı (sunucuda, limit=${LIMIT})`);
   {
     const owner = hash('owner');
-    const token = await login(owner);
+    const token = login(owner);
     ok('sahip girişi', !!token);
 
     // Sınır KABUL EDİLMİŞ partnerlikleri sayar, bekleyen istekleri değil —
     // yoksa gönderilip reddedilen davetler tavanı doldururdu.
     for (let i = 0; i < LIMIT; i++) {
       const peer = hash(`peer${i}`);
-      await login(peer);
+      login(peer);
       const conn = await req('POST', '/api/partner/connect', {
         token,
         body: { partnerHash: peer },
@@ -222,7 +227,7 @@ async function main() {
     // (Tohumlama test/premium_limit_seed.mjs içinde, DB yoluna erişimle.)
     if (process.env.SEEDED_FULL_OWNER) {
       const full = await req('POST', '/api/partner/connect', {
-        token: await login(process.env.SEEDED_FULL_OWNER),
+        token: login(process.env.SEEDED_FULL_OWNER),
         body: { partnerHash: hash('overflow') },
       });
       ok('tavan dolu sahipte 409 partner_limit_reached',
