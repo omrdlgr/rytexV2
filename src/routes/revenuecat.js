@@ -93,6 +93,7 @@ export default async function revenuecatRoutes(fastify) {
           productId: null,
           source: null,
           eventType: 'TRANSFER',
+          environment: event.environment ?? null,
         });
         closed++;
       }
@@ -123,6 +124,9 @@ export default async function revenuecatRoutes(fastify) {
       return reply.send({ status: 'ignored_other_entitlement' });
     }
 
+    // environment: 'PRODUCTION' | 'SANDBOX'. Satır yazılır ama sandbox hakkı
+    // isActive() tarafından SAYILMAZ — bkz. db.js. Olayı yine de kaydediyoruz
+    // ki test sırasında webhook'un düştüğünü görebilelim.
     entitlements.upsert({
       phoneHash: appUserId,
       active,
@@ -130,10 +134,11 @@ export default async function revenuecatRoutes(fastify) {
       productId: event.product_id ?? null,
       source: event.store === 'PROMOTIONAL' ? 'promotional' : 'store',
       eventType: event.type ?? null,
+      environment: event.environment ?? null,
     });
 
     request.log.info(
-      { type: event.type, active },
+      { type: event.type, active, environment: event.environment ?? null },
       'RevenueCat entitlement güncellendi',
     );
     return reply.send({ status: 'ok' });

@@ -66,10 +66,20 @@ const PARTNER_LIMIT = Number(process.env.PARTNER_LIMIT || 5);
 // istemci yalan söyleyemez) kohorttaysa promotional hak tanımalı.
 const ENFORCE_PREMIUM = process.env.ENFORCE_PREMIUM === 'true';
 
+// SANDBOX ortamından gelen hakkın geçerli sayılıp sayılmayacağı.
+//
+// ⚠️ VARSAYILAN KAPALI ve öyle KALMALI. Sandbox satın alması Apple'ın test
+// ortamında para geçmeden tamamlanır; sayarsak TestFlight'taki herkes ücretli
+// özelliği bedavaya açar. Yalnız backend kapısını (ENFORCE_PREMIUM) test
+// ederken geçici olarak açılır.
+const ALLOW_SANDBOX_ENTITLEMENTS =
+  process.env.ALLOW_SANDBOX_ENTITLEMENTS === 'true';
+
 export {
   JWT_SECRET,
   CORS_ORIGIN,
   REVENUECAT_WEBHOOK_SECRET,
   PARTNER_LIMIT,
   ENFORCE_PREMIUM,
+  ALLOW_SANDBOX_ENTITLEMENTS,
 };

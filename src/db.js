@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { ALLOW_SANDBOX_ENTITLEMENTS } from './config.js';
 
 // Kalıcı kullanıcı deposu. Fly'da DB_PATH bir VOLUME üzerine (/data/...) gösterir;
 // volume yoksa makine restart'ında dosya uçar — fly.toml [mounts] zorunlu.
@@ -99,13 +100,14 @@ db.exec(`
   -- yazamaz. phone_hash = RevenueCat appUserID (giriş yapmış kullanıcıda
   -- phoneHash). expires_at NULL = süresiz (ömür boyu/hediye hak).
   CREATE TABLE IF NOT EXISTS entitlements (
-    phone_hash TEXT PRIMARY KEY,
-    active     INTEGER NOT NULL,     -- 0/1, expires_at'ten türetilir
-    expires_at INTEGER,              -- ms epoch, NULL = süresiz
-    product_id TEXT,
-    source     TEXT,                 -- 'store' | 'promotional'
-    event_type TEXT,                 -- son RC olayı (teşhis için)
-    updated_at INTEGER NOT NULL
+    phone_hash  TEXT PRIMARY KEY,
+    active      INTEGER NOT NULL,    -- 0/1, expires_at'ten türetilir
+    expires_at  INTEGER,             -- ms epoch, NULL = süresiz
+    product_id  TEXT,
+    source      TEXT,                -- 'store' | 'promotional'
+    event_type  TEXT,                -- son RC olayı (teşhis için)
+    environment TEXT,                -- 'PRODUCTION' | 'SANDBOX' (bkz. isActive)
+    updated_at  INTEGER NOT NULL
   );
 `);
 
@@ -231,22 +233,40 @@ export const partnerships = {
 };
 
 // ── Abonelik hakkı (RevenueCat webhook'u yazar) ─────────────────────
+
+// Şema göçü: environment (2026-08-11). RevenueCat olayı SANDBOX mı PRODUCTION
+// mı olduğunu söylüyordu, biz okumuyorduk — sandbox satın alması canlı DB'ye
+// gerçek hak yazıyordu. Bedava olduğu için ENFORCE_PREMIUM açıldığı gün
+// TestFlight'taki herkes ödemeden premium alırdı. Eski satırlar NULL kalır;
+// NULL = "bilinmiyor" ve isActive() bunu üretim sayar (o satırlar zaten
+// sütun eklenmeden önce yazıldı, hepsi bizim testimiz).
+{
+  const cols = db.prepare('PRAGMA table_info(entitlements)').all().map((c) => c.name);
+  if (!cols.includes('environment')) {
+    db.exec('ALTER TABLE entitlements ADD COLUMN environment TEXT');
+  }
+}
+
 const _entUpsert = db.prepare(
   `INSERT INTO entitlements
-     (phone_hash, active, expires_at, product_id, source, event_type, updated_at)
-   VALUES (?, ?, ?, ?, ?, ?, ?)
+     (phone_hash, active, expires_at, product_id, source, event_type,
+      environment, updated_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
    ON CONFLICT(phone_hash) DO UPDATE SET
-     active     = excluded.active,
-     expires_at = excluded.expires_at,
-     product_id = excluded.product_id,
-     source     = excluded.source,
-     event_type = excluded.event_type,
-     updated_at = excluded.updated_at`,
+     active      = excluded.active,
+     expires_at  = excluded.expires_at,
+     product_id  = excluded.product_id,
+     source      = excluded.source,
+     event_type  = excluded.event_type,
+     environment = excluded.environment,
+     updated_at  = excluded.updated_at`,
 );
 const _entGet = db.prepare('SELECT * FROM entitlements WHERE phone_hash = ?');
 
 export const entitlements = {
-  upsert({ phoneHash, active, expiresAt, productId, source, eventType }) {
+  upsert({
+    phoneHash, active, expiresAt, productId, source, eventType, environment,
+  }) {
     _entUpsert.run(
       phoneHash,
       active ? 1 : 0,
@@ -254,6 +274,7 @@ export const entitlements = {
       productId ?? null,
       source ?? null,
       eventType ?? null,
+      environment ?? null,
       Date.now(),
     );
   },
@@ -267,15 +288,23 @@ export const entitlements = {
       productId: r.product_id,
       source: r.source,
       eventType: r.event_type,
+      environment: r.environment,
       updatedAt: r.updated_at,
     };
   },
   /// Kayıtlı hak ŞU AN geçerli mi. `active` bayrağı olaydan gelir ama
   /// süre dolmuşsa webhook gecikse bile burada kapanır — zamanla kendini
   /// düzelten kontrol.
+  ///
+  /// SANDBOX hakkı SAYILMAZ: sandbox satın alması para geçmeden tamamlanır
+  /// (Apple test ortamı), yani ücretli özelliği bedavaya açardı. Satır yine
+  /// de YAZILIR — testte olayın geldiğini görebilmemiz gerekiyor; yalnız
+  /// burada, kapının önünde eleniyor. Backend kapısını test etmek için
+  /// ALLOW_SANDBOX_ENTITLEMENTS=true.
   isActive(phoneHash, now = Date.now()) {
     const e = this.get(phoneHash);
     if (!e || !e.active) return false;
+    if (e.environment === 'SANDBOX' && !ALLOW_SANDBOX_ENTITLEMENTS) return false;
     return e.expiresAt == null || e.expiresAt > now;
   },
 };

@@ -113,6 +113,17 @@ async function main() {
       headers: { authorization: RC_SECRET },
     });
     ok('süre bitimi 200', expired.status === 200);
+
+    // SANDBOX olayı da işlenir ve KAYDEDİLİR — hakkın sayılmaması db.js
+    // isActive() içinde, kapının önünde olur (bkz. entitlement_env_test.mjs).
+    // Burada test edilen: alan uçtan geçiyor, route patlamıyor.
+    const sandbox = await req('POST', '/api/revenuecat/webhook', {
+      body: rcEvent(hash('sandbox'), { environment: 'SANDBOX' }),
+      headers: { authorization: RC_SECRET },
+    });
+    ok('SANDBOX olayı 200 (yazılır, ama hak sayılmaz)',
+      sandbox.status === 200 && sandbox.json?.status === 'ok',
+      JSON.stringify(sandbox.json));
   }
 
   console.log('\n── Bizi ilgilendirmeyen olaylar sessizce yutulur');
