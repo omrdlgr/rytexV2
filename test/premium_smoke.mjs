@@ -186,6 +186,13 @@ async function main() {
         transfer.json?.closed === 1,
       `→ ${transfer.status} ${JSON.stringify(transfer.json)}`);
 
+    // Hedef tarafı: RevenueCat API'si yapılandırılmamışsa uzlaştırma
+    // sessizce atlanır (opened=0) ve akış KIRILMAZ. Yapılandırılmışsa
+    // gerçek hak API'den okunur — bkz. entitlement_sync.js.
+    ok('TRANSFER yanıtı hedef sayısını da bildirir (opened alanı)',
+      typeof transfer.json?.opened === 'number',
+      JSON.stringify(transfer.json));
+
     const transferAnon = await req('POST', '/api/revenuecat/webhook', {
       body: {
         event: {

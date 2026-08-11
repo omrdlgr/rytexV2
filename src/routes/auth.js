@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { userStore, pushTokens, partnerships, deleteAccount } from '../db.js';
 import { signToken, revokeToken, authenticateRequest } from '../token.js';
 import { verifyPhoneToken } from '../firebase.js';
+import { reconcileEntitlement } from '../entitlement_sync.js';
 import { peers } from './partner.js';
 
 // Frontend phoneHashOf ile AYNI: SHA-256(E.164 numara), hex.
@@ -44,6 +45,18 @@ export default async function authRoutes(fastify) {
     const phoneHash = phoneHashOf(phone);
     userStore.ensurePhone(phoneHash);
     const token = signToken(phoneHash);
+
+    // Hak uzlaştırması — girişte RevenueCat'e GERÇEK durumu sor.
+    //
+    // Webhook tek başına yetmiyor: kullanıcı uygulamayı silip kurunca hak
+    // anonim kimliğe taşınıyor, tekrar giriş yapınca phoneHash'e dönüyor ve
+    // RC bu geri dönüş için OLAY GÖNDERMİYOR (canlıda doğrulandı). Girişten
+    // daha iyi bir uzlaştırma anı yok: kimlik tam da burada kesinleşiyor.
+    //
+    // Yanıtı BEKLETMİYORUZ: giriş RevenueCat'e bağımlı hale gelmemeli.
+    // Hata yutulmaz, loglanır; 'bilinmiyor' durumunda satıra dokunulmaz.
+    reconcileEntitlement(phoneHash, request.log);
+
     return reply.send({ token, phoneHash });
   });
 

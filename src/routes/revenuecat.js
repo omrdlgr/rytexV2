@@ -1,5 +1,6 @@
 import { entitlements } from '../db.js';
 import { REVENUECAT_WEBHOOK_SECRET } from '../config.js';
+import { reconcileEntitlement } from '../entitlement_sync.js';
 
 /// Uygulamanın umursadığı tek entitlement — istemcideki
 /// PurchasesService.entitlementId ile birebir aynı olmalı.
@@ -7,8 +8,11 @@ const ENTITLEMENT_ID = 'premium';
 
 /// RevenueCat anonim kullanıcı kimliği öneki. Giriş yapmamış kullanıcı bu
 /// kimlikle görünür; partner özellikleri zaten telefon doğrulaması istediği
-/// için anonim satın almanın burada karşılığı yok — kullanıcı giriş yapınca
-/// RevenueCat kimliği phoneHash'e taşır ve yeni olay düşer.
+/// için anonim satın almanın burada karşılığı yok.
+///
+/// ⚠️ Kullanıcı giriş yapınca RC hakkı phoneHash'e taşır ama BU GEÇİŞ İÇİN
+/// OLAY GÖNDERMEZ (canlıda doğrulandı 2026-08-12). Bu yüzden uzlaştırma
+/// girişte API'den yapılır — bkz. entitlement_sync.js.
 const ANON_PREFIX = '$RCAnonymousID:';
 
 /// Olaydan "hak şu an geçerli mi" kararını çıkarır.
@@ -85,7 +89,7 @@ export default async function revenuecatRoutes(fastify) {
       for (const id of from) {
         if (typeof id !== 'string' || id.startsWith(ANON_PREFIX)) continue;
         // Hak artik bu kimlikte DEGIL. Bitis/urun bilgisi tasinmadigi icin
-        // yalnizca kapatiyoruz; yeni sahibin hakki kendi olayiyla gelir.
+        // yalnizca kapatiyoruz; hedef asagida API'den uzlastirilir.
         entitlements.upsert({
           phoneHash: id,
           active: false,
@@ -97,8 +101,21 @@ export default async function revenuecatRoutes(fastify) {
         });
         closed++;
       }
-      request.log.info({ closed }, 'RevenueCat TRANSFER islendi');
-      return reply.send({ status: 'transfer_handled', closed });
+      // Hedefi AÇ. Eskiden yalnız kaynak kapatılıyordu ve koda "yeni sahibin
+      // hakkı kendi olayıyla gelir" diye yazılmıştı — bu varsayım YANLIŞTI
+      // (saha, 2026-08-12): transferde ürün/bitiş bilgisi taşınmıyor ve RC
+      // alıcı için ayrı bir olay göndermiyor. Sonuç: hak hiçbir kimlikte
+      // açık kalmıyordu. Gerçeği API'den soruyoruz.
+      const to = Array.isArray(event.transferred_to) ? event.transferred_to : [];
+      let opened = 0;
+      for (const id of to) {
+        if (typeof id !== 'string' || id.startsWith(ANON_PREFIX)) continue;
+        const truth = await reconcileEntitlement(id, request.log);
+        if (truth?.active) opened++;
+      }
+
+      request.log.info({ closed, opened }, 'RevenueCat TRANSFER islendi');
+      return reply.send({ status: 'transfer_handled', closed, opened });
     }
 
     if (typeof event.app_user_id !== 'string') {

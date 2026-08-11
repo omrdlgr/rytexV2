@@ -75,6 +75,16 @@ const ENFORCE_PREMIUM = process.env.ENFORCE_PREMIUM === 'true';
 const ALLOW_SANDBOX_ENTITLEMENTS =
   process.env.ALLOW_SANDBOX_ENTITLEMENTS === 'true';
 
+// RevenueCat REST API (v2) — hak durumunu kaynağından SORMAK için.
+// Webhook tek başına yetmiyor: uygulama silinip kurulunca hak anonim kimliğe,
+// giriş yapılınca phoneHash'e geri taşınıyor ve RC bu geri dönüş için olay
+// GÖNDERMİYOR (canlıda doğrulandı 2026-08-12). Bkz. revenuecat_api.js.
+//
+// Anahtar `customer_information:customers:read` iznine sahip OLMALI.
+// Tanımsızsa uzlaştırma sessizce devre dışı kalır — hiçbir akış kırılmaz.
+const REVENUECAT_SECRET_KEY = process.env.REVENUECAT_SECRET_KEY || null;
+const REVENUECAT_PROJECT_ID = process.env.REVENUECAT_PROJECT_ID || null;
+
 export {
   JWT_SECRET,
   CORS_ORIGIN,
@@ -82,4 +92,6 @@ export {
   PARTNER_LIMIT,
   ENFORCE_PREMIUM,
   ALLOW_SANDBOX_ENTITLEMENTS,
+  REVENUECAT_SECRET_KEY,
+  REVENUECAT_PROJECT_ID,
 };
