@@ -111,6 +111,32 @@ db.exec(`
   );
 `);
 
+// ── IKINCIL INDEKSLER ──────────────────────────────────────────────────
+//
+// PK'ler tek basina YETMIYOR: bilesik PK yalnizca ONCU SUTUNDAN aranirken
+// kullanilabilir. `shares` PK'si (from_hash, to_hash) ama `WHERE to_hash=?`
+// sorgusu var — o PK'yi kullanamaz, tam tarama yapar. Ayni sey
+// partnerships(b_hash) ve partner_requests(to_hash) icin de gecerli.
+//
+// `sparks` icinse PK `id`; sicak sorgu `WHERE from_hash=? OR to_hash=?`
+// ve bu uc HER APP ACILISINDA cagriliyor. Indekssiz halde maliyet satir
+// sayisiyla DOGRUSAL buyuyor ve better-sqlite3 SENKRON — yavas sorgu
+// yalnizca o istegi degil, Node'un tek event loop'unu bloke ettigi icin
+// O AN GELEN HERKESI bekletir.
+//
+// Bugun tablolar bos sayilir; bu, buyumeden ONCE atilmasi gereken ucuz
+// adim. Migration gerektirmez, mevcut DB'ye CREATE INDEX IF NOT EXISTS
+// ile uygulanir.
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_sparks_from     ON sparks(from_hash);
+  CREATE INDEX IF NOT EXISTS idx_sparks_to       ON sparks(to_hash);
+  CREATE INDEX IF NOT EXISTS idx_shares_to       ON shares(to_hash);
+  CREATE INDEX IF NOT EXISTS idx_partnerships_b  ON partnerships(b_hash);
+  CREATE INDEX IF NOT EXISTS idx_preq_to         ON partner_requests(to_hash);
+  CREATE INDEX IF NOT EXISTS idx_push_token      ON push_tokens(token);
+  CREATE INDEX IF NOT EXISTS idx_revoked_exp     ON revoked_tokens(exp);
+`);
+
 const _insert = db.prepare(
   'INSERT INTO users (phone_hash, password_hash, created_at) VALUES (?, ?, ?)',
 );
