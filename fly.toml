@@ -19,9 +19,13 @@ primary_region = "fra"
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = true
+  # Makine bosta kapanmaya devam ETMESIN: soguk baslatma olculdu, 6,6 sn.
+  # SPARK listesi acilista birden fazla istek yapiyor ve o gecikme istemci
+  # tarafinda "SPARK yok" olarak goruluyordu (2026-08-21). Bir makine hep
+  # ayakta: shared-cpu-1x / 256MB ~ $2/ay, $10 kill-switch esiginin altinda.
+  auto_stop_machines = false
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
   [[http_service.checks]]
