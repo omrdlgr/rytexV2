@@ -61,6 +61,27 @@ TG_CHAT = os.environ.get("TG_CHAT", "")
 # (bloblar uçtan uca şifreli) ama phoneHash'ler ve partnerlik grafiği var.
 AGE_RECIPIENT = os.environ.get("RYTEX_AGE_RECIPIENT", "")
 
+RC_SECRET = os.environ.get("RC_SECRET", "")
+FIREBASE_SA = os.environ.get("FIREBASE_SA", "")
+FIREBASE_PROJECT = os.environ.get("FIREBASE_PROJECT", "rytex-78137")
+
+# Ülke kodu → ad. Kod tek başına raporu okunmaz yapıyor; listede olmayan
+# kod HAM haliyle basılır (yeni pazar sessizce kaybolmasın).
+COUNTRY = {
+    "TR": "Türkiye", "US": "ABD", "DE": "Almanya", "FR": "Fransa",
+    "GB": "İngiltere", "NL": "Hollanda", "IT": "İtalya", "ES": "İspanya",
+    "AZ": "Azerbaycan", "CA": "Kanada", "AU": "Avustralya", "MX": "Meksika",
+    "BR": "Brezilya", "RU": "Rusya", "JP": "Japonya", "CN": "Çin",
+    "PL": "Polonya", "PT": "Portekiz", "SE": "İsveç", "NO": "Norveç",
+    "AT": "Avusturya", "BE": "Belçika", "CH": "İsviçre", "IE": "İrlanda",
+    "NZ": "Y.Zelanda", "CY": "Kıbrıs", "TD": "Çad", "IN": "Hindistan",
+    "??": "bilinmiyor",
+}
+
+
+def _country(code: str) -> str:
+    return COUNTRY.get(code, code)
+
 DAILY_KEEP = 30
 WEEKLY_KEEP = 52
 SNAPSHOT_MAX_AGE_H = 26          # günlükte 24 saat + gecikme payı
@@ -174,6 +195,96 @@ def drift(now: dict, prev: dict | None) -> list[str]:
     return out
 
 
+# ── 2b. RC bayrağı, Firebase, gerçek satış ─────────────────────────────
+def _get_json(url: str, headers: dict) -> dict:
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=45) as r:
+        return json.load(r)
+
+
+def rc_flag() -> tuple[int, dict]:
+    """RevenueCat müşterileri → ülke dağılımı.
+
+    RC `last_seen_country` IP tabanlı; ASC storefront'a bakar. İkisi farklı
+    şey ölçer ve TUTMAMASI normaldir (2026-08-19'da doğrulandı)."""
+    if not RC_SECRET:
+        return 0, {}
+    h = {"Authorization": "Bearer " + RC_SECRET,
+         "Content-Type": "application/json"}
+    proj = _get_json("https://api.revenuecat.com/v2/projects", h)["items"][0]["id"]
+    url = f"https://api.revenuecat.com/v2/projects/{proj}/customers?limit=100"
+    items: list = []
+    while url:
+        d = _get_json(url, h)
+        items += d["items"]
+        nxt = d.get("next_page")
+        url = ("https://api.revenuecat.com" + nxt) if nxt else None
+    dist: dict = {}
+    for i in items:
+        c = i.get("last_seen_country") or "??"
+        dist[c] = dist.get(c, 0) + 1
+    return len(items), dist
+
+
+def _google_token() -> str:
+    import jwt                                            # noqa: PLC0415
+    with open(FIREBASE_SA, encoding="utf-8") as f:
+        sa = json.load(f)
+    now = int(datetime.now(timezone.utc).timestamp())
+    assertion = jwt.encode(
+        {"iss": sa["client_email"],
+         "scope": "https://www.googleapis.com/auth/cloud-platform",
+         "aud": "https://oauth2.googleapis.com/token",
+         "iat": now, "exp": now + 3600},
+        sa["private_key"], algorithm="RS256")
+    body = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": assertion}).encode()
+    with urllib.request.urlopen("https://oauth2.googleapis.com/token",
+                                body, timeout=45) as r:
+        return json.load(r)["access_token"]
+
+
+def firebase_stats() -> tuple[int, list]:
+    """Telefonla GERÇEKTEN giriş yapan sayısı + SMS bölge listesi.
+
+    Firebase Auth kullanıcısı ancak SMS doğrulaması BAŞARILI olunca yaratılır
+    — yani bu sayı "SMS zinciri çalışıyor mu"nun tek doğrudan kanıtı."""
+    if not FIREBASE_SA or not os.path.exists(FIREBASE_SA):
+        return -1, []
+    tok = _google_token()
+    h = {"Authorization": "Bearer " + tok}
+    users = _get_json(
+        f"https://identitytoolkit.googleapis.com/v1/projects/"
+        f"{FIREBASE_PROJECT}/accounts:batchGet?maxResults=500", h).get("users", [])
+    cfg = _get_json(
+        f"https://identitytoolkit.googleapis.com/admin/v2/projects/"
+        f"{FIREBASE_PROJECT}/config", h)
+    regions = (cfg.get("smsRegionConfig", {})
+                  .get("allowlistOnly", {}).get("allowedRegions", []))
+    return len(users), sorted(regions)
+
+
+def sales(path: Path) -> tuple[int, int]:
+    """GERÇEK PARA ile sandbox'ı ayırır.
+
+    Ayrım kritik: 12 Ağustos'ta `environment` hiç okunmuyordu ve sandbox
+    satın alması canlı DB'ye gerçek hak yazıyordu. Burada da sandbox'ı
+    gerçek satış saymak bizi yanıltırdı."""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        rows = con.execute(
+            "SELECT active, environment, source FROM entitlements").fetchall()
+    except sqlite3.Error:
+        return -1, -1
+    finally:
+        con.close()
+    real = sum(1 for a, e, _ in rows
+               if a and (e or "").upper() not in ("SANDBOX", ""))
+    sand = sum(1 for a, e, _ in rows if a and (e or "").upper() == "SANDBOX")
+    return real, sand
+
+
 # ── 3. Fly snapshot tazeliği ───────────────────────────────────────────
 def snapshot_age_hours() -> float | None:
     vol = VOLUME
@@ -279,23 +390,66 @@ def main() -> int:
         elif age_h > SNAPSHOT_MAX_AGE_H:
             problems.append(f"Fly snapshot bayat: {age_h:.0f} saat")
 
+        # Gerçek satış YEDEKTEN okunur — ek API yok, veri zaten elimizde.
+        real, sand = sales(dest)
+
+        prev_state = json.loads(STATE.read_text()) if STATE.exists() else {}
+        rc_total, rc_dist = 0, {}
+        fb_users, regions = -1, []
+        try:
+            rc_total, rc_dist = rc_flag()
+        except Exception as e:                              # noqa: BLE001
+            problems.append(f"RC okunamadı: {type(e).__name__}")
+        try:
+            fb_users, regions = firebase_stats()
+        except Exception as e:                              # noqa: BLE001
+            problems.append(f"Firebase okunamadı: {type(e).__name__}")
+
+        outside = [c for c in rc_dist if c not in regions and c != "??"] \
+            if regions else []
+        if outside:
+            problems.append("allowlist DIŞINDA trafik: "
+                            + ", ".join(_country(c) for c in outside))
+
         final = encrypt(dest)
         removed = retain()
         STATE.write_text(json.dumps(
-            {"at": started.isoformat(), "counts": counts}, indent=1))
+            {"at": started.isoformat(), "counts": counts, "rc": rc_total,
+             "fb": fb_users, "real": real}, indent=1))
 
-        lines.append(f"kayıt: {', '.join(f'{k} {v}' for k, v in counts.items() if v)}")
+        def delta(key, now_val):
+            old_val = prev_state.get(key)
+            if not isinstance(old_val, int) or not isinstance(now_val, int):
+                return ""
+            d = now_val - old_val
+            return f" (+{d})" if d > 0 else (f" ({d})" if d < 0 else "")
+
+        lines.append(f"DB: {', '.join(f'{k} {v}' for k, v in counts.items() if v)}")
         lines.append(f"yedek: {final.name} · {size / 1024:.0f} KB"
                      + (" · şifreli" if final.suffix == ".age" else ""))
-        lines.append(f"snapshot: {age_h:.0f} sa önce" if age_h is not None else "snapshot: yok")
+        lines.append(f"snapshot: {age_h:.0f} sa önce" if age_h is not None
+                     else "snapshot: yok")
         lines.append(f"arşiv: {len(list(BACKUP_DIR.glob('rytex-*.db*')))} dosya"
                      + (f" (-{removed})" if removed else ""))
+        if rc_total:
+            top = sorted(rc_dist.items(), key=lambda x: -x[1])
+            lines.append("")
+            lines.append(f"🚩 RC {rc_total} müşteri{delta('rc', rc_total)}")
+            lines.append("   " + " · ".join(f"{_country(c)} {n}" for c, n in top))
+            lines.append(f"   allowlist dışında: {len(outside)}")
+        if real >= 0:
+            lines.append(f"💳 gerçek satış: {real}{delta('real', real)}"
+                         f"   (sandbox {sand})")
+        if fb_users >= 0:
+            lines.append(f"📱 telefonla giriş: {fb_users}{delta('fb', fb_users)}"
+                         f" · SMS bölge: {len(regions)} ülke")
     except Exception as e:                                  # noqa: BLE001
         problems.append(f"ÇALIŞMA HATASI: {type(e).__name__}: {e}")
 
     ok = not problems
-    head = "✅ RYTEX DB nöbeti temiz" if ok else "🔴 RYTEX DB nöbeti — SORUN"
-    body = [head, started.strftime("%d.%m.%Y %H:%M UTC"), ""]
+    head = "✅ RYTEX raporu" if ok else "🔴 RYTEX raporu — SORUN"
+    # Yerel saat: makine Europe/Istanbul, rapor da o saatle okunuyor.
+    body = [head, started.astimezone().strftime("%d.%m.%Y %H:%M"), ""]
     if problems:
         body += ["<b>Sorunlar</b>"] + [f"• {p}" for p in problems] + [""]
     body += lines
