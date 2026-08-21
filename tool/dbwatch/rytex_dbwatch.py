@@ -424,7 +424,11 @@ def main() -> int:
             d = now_val - old_val
             return f" (+{d})" if d > 0 else (f" ({d})" if d < 0 else "")
 
-        lines.append(f"DB: {', '.join(f'{k} {v}' for k, v in counts.items() if v)}")
+        # Tablolar <pre> içinde: Telegram tek genişlikli basar, sütun kayması
+        # olmaz. Sıfır satır gizlenmez — "0 oldu" bilgisi de bilgidir.
+        lines.append("<pre>" + "\n".join(
+            f"{k:<17}{v:>4}" for k, v in counts.items() if v is not None)
+            + "</pre>")
         lines.append(f"yedek: {final.name} · {size / 1024:.0f} KB"
                      + (" · şifreli" if final.suffix == ".age" else ""))
         lines.append(f"snapshot: {age_h:.0f} sa önce" if age_h is not None
@@ -435,11 +439,14 @@ def main() -> int:
             top = sorted(rc_dist.items(), key=lambda x: -x[1])
             lines.append("")
             lines.append(f"🚩 RC {rc_total} müşteri{delta('rc', rc_total)}")
-            lines.append("   " + " · ".join(f"{_country(c)} {n}" for c, n in top))
-            lines.append(f"   allowlist dışında: {len(outside)}")
+            lines.append("<pre>" + "\n".join(
+                f"{_country(c):<12}{n:>4}" for c, n in top) + "</pre>")
+            lines.append(f"allowlist dışında: {len(outside)}")
         if real >= 0:
-            lines.append(f"💳 gerçek satış: {real}{delta('real', real)}"
-                         f"   (sandbox {sand})")
+            # Sandbox raporda YOK (kullanıcı kararı 2026-08-22): gerçek para
+            # sorusu soruluyor, sandbox o soruyu bulandırıyor. Ayrım kodda
+            # duruyor, yalnız gösterilmiyor.
+            lines.append(f"💳 gerçek satış: {real}{delta('real', real)}")
         if fb_users >= 0:
             lines.append(f"📱 telefonla giriş: {fb_users}{delta('fb', fb_users)}"
                          f" · SMS bölge: {len(regions)} ülke")
