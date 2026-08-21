@@ -10,6 +10,11 @@ const ALLOWED_STATUS = ['accepted', 'not_today', 'suggest', 'maybe'];
 export default async function sparkRoutes(fastify) {
   // SPARK gönder. POST /api/spark  Body: { to, blob }
   fastify.post('/spark', {
+    // KENDI BUTCESI (2026-08-21). Rota bazli limit ayri sayacta tutulur,
+    // yani ucuz GET yagmuru genel butceyi bitirse bile KULLANICININ BASLATTIGI
+    // bu eylem 429 yemez. Saha vakasinda tam tersi olmustu: /keys istekleri
+    // butceyi yiyor, sonra SPARK gonderimi ve cevabi reddediliyordu.
+    config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     schema: {
       body: {
         type: 'object',
@@ -39,7 +44,11 @@ export default async function sparkRoutes(fastify) {
   });
 
   // Bana ait SPARK'lar (gönderdiğim + aldığım). GET /api/sparks
-  fastify.get('/sparks', async (request, reply) => {
+  // Liste her app acilisinda + her gonderim/cevap sonrasi cekiliyor; kendi
+  // butcesi olsun ki genel butce dolunca liste BOSALMASIN.
+  fastify.get('/sparks', {
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;
     // Tembel süre dolumu: 7 günü geçmiş cevapsızlar 'expired' olur (nötr
@@ -56,6 +65,8 @@ export default async function sparkRoutes(fastify) {
   // SPARK'a cevap ver (yalnız ALICI). POST /api/spark/respond
   // Body: { id, status, blob? }  status: accepted|not_today|suggest|maybe
   fastify.post('/spark/respond', {
+    // Kendi butcesi — gerekcesi POST /spark'ta.
+    config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
     schema: {
       body: {
         type: 'object',
@@ -89,6 +100,7 @@ export default async function sparkRoutes(fastify) {
 
   // SPARK sil (iki taraftan biri gizleyebilir). POST /api/spark/delete
   fastify.post('/spark/delete', {
+    config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
     schema: {
       body: {
         type: 'object',

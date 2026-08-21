@@ -23,6 +23,12 @@ export default async function shareRoutes(fastify) {
 
   // Bir partnerin ortak anahtarını al (şifrelemek için).
   // GET /api/keys/:hash
+  //
+  // BILEREK kendi rate-limit butcesi YOK (2026-08-21). En cok istek alan uc
+  // burasi ve butceyi yiyen de buydu; ama bu uc phoneHash ile SORGULANIYOR,
+  // yani yuksek butce phoneHash ENUMERASYONUNU hizlandirir (11 Agustos
+  // denetiminde acik kalem). Cozum limiti gevsetmek degil, istemcinin
+  // gereksiz istegi kesmesiydi — liste basina 7-8 istek 1'e indirildi.
   fastify.get('/keys/:hash', async (request, reply) => {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;

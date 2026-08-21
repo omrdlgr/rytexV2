@@ -30,9 +30,18 @@ await fastify.register(cors, {
 
 // Global rate limit — IP başına dakikada 100 istek (genel kötüye kullanım)
 // Auth route'ları kendi sıkı limitlerini ayrıca uygular (bkz. auth.js).
+// 100 -> 300 (2026-08-21). 100 ev kullanimi icin bile darmis: iki iPhone
+// ayni WiFi'da AYNI IP'yi paylasiyor ve butceyi bolusuyor. Mobil veride
+// daha kotu — operator CGNAT'inda binlerce abone tek IP arkasinda olabilir,
+// o zaman limit tek kullaniciyi degil o operatordeki HERKESI vurur.
+//
+// Saha vakasi: istemci SPARK listesi basina 7-8 GET /keys atiyordu (istemci
+// tarafinda duzeltildi); 197 anahtar istegi dakikalik butceyi bitiriyor,
+// sonra gercek eylem 429 aliyordu. Kullanici "cevabin gonderilemedi,
+// baglantini kontrol et" goruyordu — baglanti saglamdi, REDDEDEN BIZDIK.
 await fastify.register(rateLimit, {
   global: true,
-  max: 100,
+  max: 300,
   timeWindow: '1 minute',
 });
 
