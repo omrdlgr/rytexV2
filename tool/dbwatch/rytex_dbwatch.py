@@ -338,7 +338,9 @@ def encrypt(path: Path) -> Path:
 # ── 5. Rapor ───────────────────────────────────────────────────────────
 def telegram(text: str, dry: bool) -> None:
     if dry or not TG_TOKEN or not TG_CHAT:
-        print("[telegram atlandı]\n" + text)
+        # Metni BURADA basma: çağıran zaten basıyor, ikisi birden loga
+        # raporu iki kez yazıyordu (saatlik koşuda log iki katı şişiyor).
+        print("[telegram atlandı]")
         return
     data = urllib.parse.urlencode({
         "chat_id": TG_CHAT, "text": text, "parse_mode": "HTML",
