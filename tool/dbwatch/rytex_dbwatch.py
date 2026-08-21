@@ -352,6 +352,11 @@ def telegram(text: str, dry: bool) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="Telegram'a yazma")
+    # Saatlik koşuda yedek HER SAAT alınır ama mesaj yalnız rapor saatinde
+    # gider; aksi halde günde 24 bildirim olurdu. SORUN VARSA saat
+    # beklenmez — geç fark edilen bozulma bu işin bütün amacını bozar.
+    ap.add_argument("--quiet", action="store_true",
+                    help="yalnız rapor saatinde veya sorun varsa gönder")
     args = ap.parse_args()
 
     started = datetime.now(timezone.utc)
@@ -424,11 +429,12 @@ def main() -> int:
             d = now_val - old_val
             return f" (+{d})" if d > 0 else (f" ({d})" if d < 0 else "")
 
-        # Tablolar <pre> içinde: Telegram tek genişlikli basar, sütun kayması
-        # olmaz. Sıfır satır gizlenmez — "0 oldu" bilgisi de bilgidir.
-        lines.append("<pre>" + "\n".join(
-            f"{k:<17}{v:>4}" for k, v in counts.items() if v is not None)
-            + "</pre>")
+        # DÜZ SATIR, tablo değil (kullanıcı kararı 2026-08-22): Telegram
+        # <pre> bloğunun üstüne kopyala ikonu bindirip sayıyı okunmaz
+        # yapıyordu. Sıfır satır gizlenmez — "0 oldu" bilgisi de bilgidir.
+        for k, v in counts.items():
+            if v is not None:
+                lines.append(f"{k}: {v}")
         lines.append(f"yedek: {final.name} · {size / 1024:.0f} KB"
                      + (" · şifreli" if final.suffix == ".age" else ""))
         lines.append(f"snapshot: {age_h:.0f} sa önce" if age_h is not None
@@ -439,8 +445,8 @@ def main() -> int:
             top = sorted(rc_dist.items(), key=lambda x: -x[1])
             lines.append("")
             lines.append(f"🚩 RC {rc_total} müşteri{delta('rc', rc_total)}")
-            lines.append("<pre>" + "\n".join(
-                f"{_country(c):<12}{n:>4}" for c, n in top) + "</pre>")
+            for c, n in top:
+                lines.append(f"{_country(c)}: {n}")
             lines.append(f"allowlist dışında: {len(outside)}")
         if real >= 0:
             # Sandbox raporda YOK (kullanıcı kararı 2026-08-22): gerçek para
@@ -460,7 +466,11 @@ def main() -> int:
     if problems:
         body += ["<b>Sorunlar</b>"] + [f"• {p}" for p in problems] + [""]
     body += lines
-    telegram("\n".join(body), args.dry)
+    hours = [int(h) for h in
+             os.environ.get("REPORT_HOURS", "10,21").split(",") if h.strip()]
+    scheduled = started.astimezone().hour in hours
+    mute = args.quiet and ok and not scheduled
+    telegram("\n".join(body), args.dry or mute)
     print("\n".join(body))
     return 0 if ok else 1
 
