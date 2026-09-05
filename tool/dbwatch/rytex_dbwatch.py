@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -75,6 +76,7 @@ COUNTRY = {
     "PL": "Polonya", "PT": "Portekiz", "SE": "İsveç", "NO": "Norveç",
     "AT": "Avusturya", "BE": "Belçika", "CH": "İsviçre", "IE": "İrlanda",
     "NZ": "Y.Zelanda", "CY": "Kıbrıs", "TD": "Çad", "IN": "Hindistan",
+    "CI": "Fildişi Sahili",          # 2026-08-28, allowlist dışı ilk kayıt
     "??": "bilinmiyor",
 }
 
@@ -355,10 +357,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry", action="store_true", help="Telegram'a yazma")
     # Saatlik koşuda yedek HER SAAT alınır ama mesaj yalnız rapor saatinde
-    # gider; aksi halde günde 24 bildirim olurdu. SORUN VARSA saat
-    # beklenmez — geç fark edilen bozulma bu işin bütün amacını bozar.
+    # gider; aksi halde günde 24 bildirim olurdu. YENİ bir sorun saat
+    # beklemez — geç fark edilen bozulma bu işin bütün amacını bozar. Ama
+    # AYNI sorun tekrar bildirilmez: bir kez haber verilir, sürdüğü sürece
+    # susulur, planlı raporda yeniden görünür.
     ap.add_argument("--quiet", action="store_true",
-                    help="yalnız rapor saatinde veya sorun varsa gönder")
+                    help="yalnız rapor saatinde veya YENİ sorun çıkınca gönder")
     args = ap.parse_args()
 
     started = datetime.now(timezone.utc)
@@ -366,6 +370,15 @@ def main() -> int:
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     problems: list[str] = []
     lines: list[str] = []
+
+    # Önceki koşunun sorun imzası BURADA okunur, aşağıdaki tam state
+    # yazımından ÖNCE — o yazım aynı dosyayı ezip imzayı siliyor.
+    prev_sig = ""
+    if STATE.exists():
+        try:
+            prev_sig = json.loads(STATE.read_text()).get("problem_sig", "")
+        except Exception:                                   # noqa: BLE001
+            pass                       # bozuk state = imza yok = bir kez bildir
 
     try:
         token = os.urandom(8).hex()
@@ -471,9 +484,38 @@ def main() -> int:
     hours = [int(h) for h in
              os.environ.get("REPORT_HOURS", "10,21").split(",") if h.strip()]
     scheduled = started.astimezone().hour in hours
-    mute = args.quiet and ok and not scheduled
+
+    # AYNI SORUN SAAT BAŞI TEKRARLANMAZ (kullanıcı kararı 2026-09-06): sorun
+    # ilk görüldüğünde bir kez bildirilir, sürdüğü sürece susulur, planlı
+    # 10:00/21:00 raporunda zaten yeniden görünür.
+    # İMZA SORUNUN TÜRÜNDEN ÇIKAR, METNİNDEN DEĞİL: "snapshot bayat: 8 saat"
+    # bir sonraki saat "9 saat" olur, drift de "users: 9 → 8" üretir — ham
+    # metin karşılaştırması her koşuda "yeni sorun" der ve susturma hiç
+    # çalışmazdı. Rakamlar # ile değiştirilir, böylece yalnız sorun KÜMESİ
+    # değişince (yeni kalem eklenince, allowlist listesine ülke girince)
+    # yeniden bildirilir.
+    sig = "|".join(sorted(re.sub(r"\d+", "#", p) for p in problems))
+    repeat = bool(problems) and sig == prev_sig
+    mute = args.quiet and not scheduled and (ok or repeat)
+    # "Mesaj neden gelmedi" sorusunun cevabı log'da yazsın — susturma
+    # eklendikten sonra sessizlik iki farklı şey demek oluyor.
+    if mute:
+        print("[susturuldu: " + ("sorun yok" if ok else "aynı sorun sürüyor")
+              + "]")
     telegram("\n".join(body), args.dry or mute)
     print("\n".join(body))
+
+    # İMZAYI YAZ — try'ın DIŞINDA olmak ZORUNDA: çalışma hatası da bir
+    # sorundur ve o hata sürerken de susulmalı, oysa yukarıdaki tam state
+    # yazımı hataya takılınca hiç çalışmıyor.
+    st: dict = {}
+    if STATE.exists():
+        try:
+            st = json.loads(STATE.read_text())
+        except Exception:                                   # noqa: BLE001
+            st = {}
+    st["problem_sig"] = sig
+    STATE.write_text(json.dumps(st, indent=1))
     return 0 if ok else 1
 
 
