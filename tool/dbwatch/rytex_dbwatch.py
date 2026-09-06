@@ -373,10 +373,12 @@ def main() -> int:
 
     # Önceki koşunun sorun imzası BURADA okunur, aşağıdaki tam state
     # yazımından ÖNCE — o yazım aynı dosyayı ezip imzayı siliyor.
-    prev_sig = ""
+    prev_sig, prev_problems = "", []
     if STATE.exists():
         try:
-            prev_sig = json.loads(STATE.read_text()).get("problem_sig", "")
+            _st = json.loads(STATE.read_text())
+            prev_sig = _st.get("problem_sig", "")
+            prev_problems = _st.get("problems", [])
         except Exception:                                   # noqa: BLE001
             pass                       # bozuk state = imza yok = bir kez bildir
 
@@ -475,11 +477,20 @@ def main() -> int:
         problems.append(f"ÇALIŞMA HATASI: {type(e).__name__}: {e}")
 
     ok = not problems
-    head = "✅ RYTEX raporu" if ok else "🔴 RYTEX raporu — SORUN"
+    # KAPANIŞ HABERİ: sorun bir önceki koşuda vardı, şimdi yok. Susturma
+    # eklendikten sonra sessizlik iki anlama gelir oldu — "sürüyor ama
+    # susturuldu" ile "bitti" ayırt edilemiyordu. Bu mesaj o belirsizliği
+    # kapatır ve sorun başına YALNIZ BİR KEZ gider: gönderimden sonra imza
+    # boşa yazılır, ertesi saat prev_sig boş olur ve tekrar tetiklenmez.
+    resolved = ok and bool(prev_sig)
+    head = ("✅ RYTEX raporu — DÜZELDİ" if resolved else
+            "✅ RYTEX raporu" if ok else "🔴 RYTEX raporu — SORUN")
     # Yerel saat: makine Europe/Istanbul, rapor da o saatle okunuyor.
     body = [head, started.astimezone().strftime("%d.%m.%Y %H:%M"), ""]
     if problems:
         body += ["<b>Sorunlar</b>"] + [f"• {p}" for p in problems] + [""]
+    elif resolved and prev_problems:
+        body += ["<b>Düzeldi</b>"] + [f"• {p}" for p in prev_problems] + [""]
     body += lines
     hours = [int(h) for h in
              os.environ.get("REPORT_HOURS", "10,21").split(",") if h.strip()]
@@ -496,7 +507,7 @@ def main() -> int:
     # yeniden bildirilir.
     sig = "|".join(sorted(re.sub(r"\d+", "#", p) for p in problems))
     repeat = bool(problems) and sig == prev_sig
-    mute = args.quiet and not scheduled and (ok or repeat)
+    mute = args.quiet and not scheduled and not resolved and (ok or repeat)
     # "Mesaj neden gelmedi" sorusunun cevabı log'da yazsın — susturma
     # eklendikten sonra sessizlik iki farklı şey demek oluyor.
     if mute:
@@ -515,6 +526,7 @@ def main() -> int:
         except Exception:                                   # noqa: BLE001
             st = {}
     st["problem_sig"] = sig
+    st["problems"] = problems          # kapanış mesajında adıyla anılsın
     STATE.write_text(json.dumps(st, indent=1))
     return 0 if ok else 1
 
