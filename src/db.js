@@ -435,8 +435,19 @@ export const shares = {
   }
 }
 
-// Cevapsız SPARK bu süreden sonra 'expired' olur — bayat talep iki tarafta da
-// duygusal yük ("reddedildim" / eskimiş istek garabeti) bırakmasın.
+// SPARK bu süreden sonra CEVAPLANMIŞ OLSUN OLMASIN kaydından SİLİNİR
+// (kullanıcı kararı 2026-09-07). Süre HER SPARK'ın KENDİ yaşına bakar —
+// toplu süpürme değil: 5 günlük bir kayıt dururken 7 günü dolan gider.
+//
+// NEDEN İŞARETLEME DEĞİL SİLME: manuel silme kaldırıldı, gerekçe kullanıcının
+// ("silme karşı tarafta RET gibi algılanabilir"). Manuel silme gidince liste
+// temizliğini zaman devraldı. Ayrıca manuel silme, aşağıdaki bekleyen-SPARK
+// kapısı için bir KAÇIŞ DELİĞİYDİ: gönder → sil → gönder ile kapı aşılır ve
+// her gönderim alıcıya push atardı.
+//
+// ⚠️ 'expired' DURUMU ARTIK ÜRETİLMİYOR. Eskiden cevapsız kayıt 7. günde
+// 'expired' işaretlenip listede kalıyordu; şimdi aynı anda siliniyor. Statü
+// sabiti eski istemciler için yerinde bırakıldı.
 export const SPARK_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const _sparkInsert = db.prepare(
@@ -456,9 +467,18 @@ const _sparkDelete = db.prepare('DELETE FROM sparks WHERE id = ?');
 const _sparkMarkDelivered = db.prepare(
   `UPDATE sparks SET delivered_at = ? WHERE to_hash = ? AND delivered_at IS NULL`,
 );
-const _sparkExpire = db.prepare(
-  `UPDATE sparks SET status = 'expired', updated_at = ?
-   WHERE status = 'pending' AND created_at < ?`,
+// TTL'i dolan HER kayıt silinir — cevaplanmış olsun olmasın. Satır bazlı:
+// koşul her satırın KENDİ created_at'ine bakar.
+const _sparkPurge = db.prepare('DELETE FROM sparks WHERE created_at < ?');
+
+// Bekleyen-SPARK kapısı: aynı kişiye cevap gelmeden ikincisi gönderilemez.
+// Yön ÖNEMLİ (from → to): karşı taraf bana SPARK gönderebilir, o ayrı kayıt.
+// TTL'i dolmuş satır burada sayılmaz çünkü GET'te zaten siliniyor; yine de
+// created_at şartı konuldu ki purge henüz koşmamışken bile kapı açılsın.
+const _sparkPendingBetween = db.prepare(
+  `SELECT 1 FROM sparks
+   WHERE from_hash = ? AND to_hash = ? AND status = 'pending' AND created_at >= ?
+   LIMIT 1`,
 );
 
 export const sparks = {
@@ -485,10 +505,17 @@ export const sparks = {
   markDelivered(toHash) {
     _sparkMarkDelivered.run(Date.now(), toHash);
   },
-  // Cevapsız + TTL'i geçmiş istekleri 'expired' yap (tembel; GET'te çağrılır).
-  expireStale() {
-    const now = Date.now();
-    _sparkExpire.run(now, now - SPARK_TTL_MS);
+  // TTL'i dolan kayıtları SİL (tembel; GET'te çağrılır). Cevaplanmış olsun
+  // olmasın. Her satır kendi yaşına göre gider.
+  purgeStale() {
+    _sparkPurge.run(Date.now() - SPARK_TTL_MS);
+  },
+
+  // [fromHash]'in [toHash]'e cevap BEKLEYEN bir SPARK'ı var mı?
+  hasPendingTo(fromHash, toHash) {
+    return _sparkPendingBetween.get(
+      fromHash, toHash, Date.now() - SPARK_TTL_MS,
+    ) !== undefined;
   },
   get(id) {
     return _sparkGet.get(id);

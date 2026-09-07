@@ -35,6 +35,20 @@ export default async function sparkRoutes(fastify) {
     if (!partnerships.isPartner(claims.sub, to)) {
       return reply.code(403).send({ error: 'not_partner' });
     }
+    // BEKLEYEN-SPARK KAPISI (kullanıcı kararı 2026-09-07). Aynı kişiye,
+    // cevap gelmeden ikinci SPARK gönderilemez.
+    //
+    // NEDEN SUNUCUDA: bu bir KÖTÜYE KULLANIM kapısı, istemci kapısı aşılabilir
+    // (uç doğrudan çağrılabilir, eski sürümler kapıyı hiç bilmiyor). Bugüne
+    // kadar tek fren dakikada 30'luk rate limit'ti — yani bir partner
+    // DAKİKADA 30 bildirim ürettirebiliyordu. İki kişilik mahrem bir bağlamda
+    // bu yalnız "spam" değil, taciz/baskı yüzeyi.
+    //
+    // Kapı en fazla TTL kadar (7 gün) kapalı kalır: cevapsız kayıt o süre
+    // dolunca silinir ve yeni gönderim yeniden açılır.
+    if (sparks.hasPendingTo(claims.sub, to)) {
+      return reply.code(409).send({ error: 'spark_pending' });
+    }
     const id = sparks.create(claims.sub, to, blob);
     // Alıcıya gizli push (jenerik metin, içeriksiz). Sonuç gönderene döner —
     // UI dürüst beklenti kurar ("bildirim yollandı" / "app'i açınca görecek").
@@ -51,9 +65,10 @@ export default async function sparkRoutes(fastify) {
   }, async (request, reply) => {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;
-    // Tembel süre dolumu: 7 günü geçmiş cevapsızlar 'expired' olur (nötr
-    // üçüncü durum — ne kabul ne ret; bayat talep asılı kalmaz).
-    sparks.expireStale();
+    // Tembel temizlik: TTL'i dolan kayıtlar CEVAPLANMIŞ OLSUN OLMASIN silinir
+    // (kullanıcı kararı 2026-09-07). Manuel silme kaldırıldığı için liste
+    // temizliğini zaman yapıyor. Satır bazlı — 5 günlük kayıt durur.
+    sparks.purgeStale();
     const list = sparks.forUser(claims.sub);
     // Bana GELEN'ler bu indirmede cihaza ulaşmış oldu → damgala. Cevap bu
     // isteğin listesinden SONRA damgalanır: gönderen 'ulaştı'yı bir sonraki
@@ -98,7 +113,18 @@ export default async function sparkRoutes(fastify) {
     return reply.send({ status: 'ok' });
   });
 
-  // SPARK sil (iki taraftan biri gizleyebilir). POST /api/spark/delete
+  // SPARK sil — YENİ İSTEMCİDE YOK, yalnız ESKİ sürümler için duruyor.
+  //
+  // Manuel silme 2026-09-07'de kaldırıldı (kullanıcı: "silme karşı tarafta
+  // ret gibi algılanabilir"); temizliği artık TTL yapıyor. Ama 1.2.2 sahada
+  // ve o sürümde silme butonu VAR — ucu tamamen kaldırırsak o kullanıcılar
+  // butona bastığında hata alır.
+  //
+  // 🔴 BEKLEYEN kayıt silinemez: aksi hâlde eski istemci `gönder → sil →
+  // gönder` ile bekleyen-SPARK kapısını aşar ve her turda alıcıya push atar.
+  // Yani bu uç artık YALNIZ bitmiş kayıtları temizler — eski istemcide
+  // zaten silinmek istenen şey odur.
+  // POST /api/spark/delete
   fastify.post('/spark/delete', {
     config: { rateLimit: { max: 60, timeWindow: '1 minute' } },
     schema: {
@@ -115,6 +141,10 @@ export default async function sparkRoutes(fastify) {
     if (!row) return reply.send({ status: 'ok' });
     if (row.from_hash !== claims.sub && row.to_hash !== claims.sub) {
       return reply.code(403).send({ error: 'forbidden' });
+    }
+    // Kapının kaçış deliğini kapatır (yukarıdaki gerekçe).
+    if (row.status === 'pending') {
+      return reply.code(409).send({ error: 'spark_pending' });
     }
     sparks.delete(request.body.id);
     return reply.send({ status: 'ok' });
