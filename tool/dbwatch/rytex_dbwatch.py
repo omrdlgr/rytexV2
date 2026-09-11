@@ -77,6 +77,15 @@ COUNTRY = {
     "AT": "Avusturya", "BE": "Belçika", "CH": "İsviçre", "IE": "İrlanda",
     "NZ": "Y.Zelanda", "CY": "Kıbrıs", "TD": "Çad", "IN": "Hindistan",
     "CI": "Fildişi Sahili",          # 2026-08-28, allowlist dışı ilk kayıt
+    "VE": "Venezuela",               # 2026-09-11, engellenen SMS'te bulundu
+    # 2026-09-11 A grubu açılışı (allowlist 28 → 55)
+    "DK": "Danimarka", "FI": "Finlandiya", "IS": "İzlanda", "LU": "Lüksemburg",
+    "GR": "Yunanistan", "CZ": "Çekya", "SK": "Slovakya", "HU": "Macaristan",
+    "RO": "Romanya", "BG": "Bulgaristan", "HR": "Hırvatistan", "SI": "Slovenya",
+    "EE": "Estonya", "LV": "Letonya", "LT": "Litvanya", "MT": "Malta",
+    "KR": "G.Kore", "TW": "Tayvan", "HK": "Hong Kong", "SG": "Singapur",
+    "AR": "Arjantin", "CL": "Şili", "CO": "Kolombiya", "PE": "Peru",
+    "UY": "Uruguay", "IL": "İsrail", "ZA": "G.Afrika",
     "??": "bilinmiyor",
 }
 
@@ -87,6 +96,12 @@ def _country(code: str) -> str:
 DAILY_KEEP = 30
 WEEKLY_KEEP = 52
 SNAPSHOT_MAX_AGE_H = 26          # günlükte 24 saat + gecikme payı
+
+# SMS trafiği alarm eşiği. Keyfi değil ÖLÇÜLDÜ: telefon auth 1 Temmuz'da
+# canlıya girdi ve 11 Eylül'e kadar TÜM TARİHÇEDE 15 SMS gitti. Günde 20
+# SMS bu tabloda anormaldir — normal büyümede bile haftalar alır.
+SMS_DAILY_ALARM = 20
+SMS_WINDOW_H = 24
 
 # Düşmesi BEKLENMEYEN tablolar. users hesap silmeyle düşebilir ama sıçrama
 # şüphelidir; sparks/shares kullanıcı eylemiyle düşer, alarm üretmez.
@@ -265,6 +280,102 @@ def firebase_stats() -> tuple[int, list]:
     regions = (cfg.get("smsRegionConfig", {})
                   .get("allowlistOnly", {}).get("allowedRegions", []))
     return len(users), sorted(regions)
+
+
+# ── 2b. SMS trafiği (Cloud Monitoring) ─────────────────────────────────
+# ⚠️ NEDEN VAR — RC BAYRAĞI DUVARA ÇARPANI GÖREMEZ. RC yalnız SDK ping'i
+# atan cihazı listeler. 2026-09-11'de ölçüldü: Venezuela'dan biri 13
+# Ağustos'ta 6 KEZ giriş denedi, altısı da engellendi, ve o kişi RC
+# listesinde HİÇ görünmedi — yani ülke açma kararlarını bir ay boyunca
+# kör bir kaynakla verdik (MX ve RU'da tesadüfen doğru çıktı, VE tamamen
+# kaçtı). Engellenen SMS, duvara çarpan insanın TEK doğrudan kanıtıdır.
+#
+# ⚠️ İKİNCİ İŞLEV — SMS POMPALAMA ERKEN UYARISI. Allowlist 55 ülkeye
+# çıktı ama reCAPTCHA istemcide SDK olmadığı için pratikte ÖLÇÜM YAPMIYOR
+# (token_count = verdict_count = 0), yani toll-fraud BLOCK@0.8 kuralı da
+# hiçbir şeye bakmıyor. $10 kill-switch fatura gecikmesiyle tetiklenir →
+# saldırıyı 24 saat sonra öğrenirdik. Bu sayaç saat başı okunur.
+#
+# ⚠️ HAM NOKTA TOPLAMI DOĞRU: iki metrik de metricKind=DELTA (API'den
+# okundu, varsayılmadı) — her nokta o aralığın FARKIDIR, CUMULATIVE değil.
+# Bu yüzden aggregation'a gerek yok ve hizalama penceresi sorunu doğmaz.
+def sms_traffic(tok: str) -> tuple[dict, dict]:
+    """(gönderilen, engellenen) — son SMS_WINDOW_H saat, ülke bazında."""
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=SMS_WINDOW_H)
+    base = (f"https://monitoring.googleapis.com/v3/projects/"
+            f"{FIREBASE_PROJECT}/timeSeries?")
+    h = {"Authorization": "Bearer " + tok}
+
+    def pull(metric: str) -> dict[str, int]:
+        q = urllib.parse.urlencode({
+            "filter": f'metric.type = '
+                      f'"identitytoolkit.googleapis.com/{metric}"',
+            "interval.startTime": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "interval.endTime": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "view": "FULL"})
+        out: dict[str, int] = {}
+        for ser in _get_json(base + q, h).get("timeSeries", []):
+            code = ser.get("metric", {}).get("labels", {}).get(
+                "region_code", "??")
+            for pt in ser.get("points", []):
+                n = int(pt.get("value", {}).get("int64Value") or 0)
+                if n:
+                    out[code] = out.get(code, 0) + n
+        return out
+
+    return pull("usage/sent_sms_count"), pull("usage/blocked_sms_count")
+
+
+def sms_report(sent: dict, blocked: dict,
+               regions: list) -> tuple[list[str], list[str]]:
+    """(rapor satırları, sorunlar).
+
+    KAPALI ülkeden engelleme SORUNDUR — orada gerçek bir insan giriş
+    denedi ve duvara çarptı; reaktif açmak zaten geç kalıyor, bir de
+    haberdar olmazsak hiç açamayız.
+    AÇIK ülkeden engelleme yalnız BİLGİDİR — sebebi anti-abuse olabilir
+    (7 Temmuz'daki TR 3 kaydının sebebi metrik etiketlerinden
+    belirlenemedi; kota metriği boştu). Sorun saymak gürültü üretir.
+    """
+    lines, problems = [], []
+    # ⚠️ regions BOŞ ise sınıflandırma YAPILAMAZ. Boş kümeyi "hiçbir ülke
+    # açık değil" diye okursak engellenen HER ülke kapalı görünür ve
+    # Firebase'in okunamadığı her koşuda sahte alarm üretiriz. Aynı koruma
+    # main'deki `outside` hesabında da var.
+    if not regions:
+        if blocked:
+            lines.append("🚧 engellenen: "
+                         + " · ".join(f"{_country(c)} {n}"
+                                      for c, n in blocked.items())
+                         + " (allowlist okunamadı, sınıflandırılmadı)")
+        return lines, problems
+    acik = set(regions)
+    kapali = {c: n for c, n in blocked.items() if c not in acik}
+    icerden = {c: n for c, n in blocked.items() if c in acik}
+    if kapali:
+        problems.append(
+            "KAPALI ÜLKEDEN GİRİŞ DENEMESİ (engellendi): "
+            + ", ".join(f"{_country(c)} {n}"
+                        for c, n in sorted(kapali.items(), key=lambda x: -x[1]))
+            + " — allowlist'e eklenecek mi?")
+    if icerden:
+        lines.append("🚧 engellenen (allowlist içi): "
+                     + " · ".join(f"{_country(c)} {n}"
+                                  for c, n in sorted(icerden.items(),
+                                                     key=lambda x: -x[1])))
+    toplam = sum(sent.values())
+    if toplam:
+        lines.append(f"📨 SMS ({SMS_WINDOW_H}sa): {toplam} · "
+                     + " · ".join(f"{_country(c)} {n}"
+                                  for c, n in sorted(sent.items(),
+                                                     key=lambda x: -x[1])))
+    if toplam >= SMS_DAILY_ALARM:
+        problems.append(
+            f"SMS SIÇRAMASI: {SMS_WINDOW_H} saatte {toplam} SMS "
+            f"(eşik {SMS_DAILY_ALARM}; tüm tarihçede 90 günde 15). "
+            "Pompalama olabilir — Firebase Console'dan bölgeyi kıs.")
+    return lines, problems
 
 
 def sales(path: Path) -> tuple[int, int]:
@@ -484,6 +595,16 @@ def main() -> int:
         except Exception as e:                              # noqa: BLE001
             problems.append(f"Firebase okunamadı: {type(e).__name__}")
 
+        sms_sent: dict = {}
+        sms_blocked: dict = {}
+        try:
+            if FIREBASE_SA and os.path.exists(FIREBASE_SA):
+                sms_sent, sms_blocked = sms_traffic(_google_token())
+        except Exception as e:                              # noqa: BLE001
+            # Yetki kaybı da bir sorundur: monitoring.viewer 2026-09-11'de
+            # elle verildi, sessizce geri alınırsa kör kalırız.
+            problems.append(f"SMS metrikleri okunamadı: {type(e).__name__}")
+
         outside = [c for c in rc_dist if c not in regions and c != "??"] \
             if regions else []
         if outside:
@@ -530,6 +651,9 @@ def main() -> int:
         if fb_users >= 0:
             lines.append(f"📱 telefonla giriş: {fb_users}{delta('fb', fb_users)}"
                          f" · SMS bölge: {len(regions)} ülke")
+        sms_lines, sms_problems = sms_report(sms_sent, sms_blocked, regions)
+        lines += sms_lines
+        problems += sms_problems
     except Exception as e:                                  # noqa: BLE001
         problems.append(f"ÇALIŞMA HATASI: {type(e).__name__}: {e}")
 
