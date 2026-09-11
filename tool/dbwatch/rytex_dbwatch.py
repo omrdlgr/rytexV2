@@ -46,7 +46,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 APP = os.environ.get("FLY_APP", "rytex-backend")
@@ -338,6 +338,63 @@ def encrypt(path: Path) -> Path:
 
 
 # ── 5. Rapor ───────────────────────────────────────────────────────────
+# ── SON TARİHLER ─────────────────────────────────────────────────────────
+# Kaçırılınca GERİ ALINAMAYAN idari tarihler. Nöbetçi zaten saat başı koşup
+# 10:00/21:00'de Telegram raporu attığı için hatırlatma buraya bindi: yeni
+# altyapı yok, kanal kanıtlanmış, makine açık olduğu sürece çalışır.
+#
+# ⚠️ Takvim uygulamasına güvenilmedi: bu tarihlerin ikisi de "unutulursa
+# başvuru/koruma düşer" cinsinden ve ikisi de aylar sonra.
+DEADLINES = [
+    ("2026-09-27", "Marka itiraz penceresi kapanıyor",
+     "EPATS → İşlemlerim: itiraz gelmiş mi, tescil kararı çıkmış mı. "
+     "Karar sonrası 7.010 TL tescil ücreti SÜRESİNDE ödenmezse başvuru "
+     "geri çekilmiş sayılır (başvuru 2026/087181)."),
+    ("2027-01-07", "Madrid/EUIPO rüçhan penceresi",
+     "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
+     "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
+     "analizi gerekir."),
+    ("2027-07-07", "Apple Developer üyelik yenilemesi",
+     "Hesapta kayıtlı kart YOK. Yenilenmezse uygulamalar App Store'dan "
+     "düşer."),
+]
+
+# Raporda görünmeye başladığı eşik, "sorun" sayıldığı eşik ve geçtikten
+# sonra kaç gün alarm vereceği.
+DEADLINE_SHOW_DAYS = 45
+DEADLINE_ALARM_DAYS = 7
+# ⚠️ GEÇMİŞ TARİH SONSUZA DEK ALARM VERMEZ: verseydi nöbetçi bir daha asla
+# "DÜZELDİ" durumuna dönemez, her planlı rapor bayat bir kalemle açılır ve
+# kullanıcı listeyi okumayı bırakırdı — yani gerçek sorunları da kaçırırdı.
+# Alarm penceresi kapandıktan sonra kalem sessiz satıra düşer; kalemi
+# LİSTEDEN DÜŞÜRMEK insanın işidir (iş bitince DEADLINES'tan sil).
+DEADLINE_STALE_DAYS = 14
+
+
+def deadlines(today: date) -> tuple[list[str], list[str]]:
+    """(rapor satırları, sorunlar) — geçmiş ya da 7 günden yakın olan SORUNDUR.
+
+    Sorun listesine girmesi bilinçli: yalnız planlı rapora yazsaydı, sorun
+    olmayan bir günde susturma devreye girip mesaj hiç gitmeyebilirdi.
+    Susturma imzası rakamları maskelediği için "5 gün kaldı" → "4 gün kaldı"
+    yeni bildirim üretmez; kalem listeden düşene kadar günde iki kez planlı
+    raporda görünür.
+    """
+    lines, problems = [], []
+    for iso, title, note in DEADLINES:
+        left = (date.fromisoformat(iso) - today).days
+        when = date.fromisoformat(iso).strftime("%d.%m.%Y")
+        if left < -DEADLINE_STALE_DAYS:
+            lines.append(f"🗓 {title}: GEÇTİ ({when}) — bitmişse listeden düş")
+        elif left < 0:
+            problems.append(f"SON TARİH GEÇTİ ({when}): {title} — {note}")
+        elif left <= DEADLINE_ALARM_DAYS:
+            problems.append(f"SON TARİH {left} gün ({when}): {title} — {note}")
+        elif left <= DEADLINE_SHOW_DAYS:
+            lines.append(f"🗓 {title}: {left} gün ({when})")
+    return lines, problems
+
+
 def telegram(text: str, dry: bool) -> None:
     if dry or not TG_TOKEN or not TG_CHAT:
         # Metni BURADA basma: çağıran zaten basıyor, ikisi birden loga
@@ -475,6 +532,11 @@ def main() -> int:
                          f" · SMS bölge: {len(regions)} ülke")
     except Exception as e:                                  # noqa: BLE001
         problems.append(f"ÇALIŞMA HATASI: {type(e).__name__}: {e}")
+
+    # Son tarih hatırlatmaları — sağlık kontrolleriyle aynı rapora biner.
+    dl_lines, dl_problems = deadlines(started.astimezone().date())
+    lines += dl_lines
+    problems += dl_problems
 
     ok = not problems
     # KAPANIŞ HABERİ: sorun bir önceki koşuda vardı, şimdi yok. Susturma
