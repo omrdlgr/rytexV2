@@ -142,6 +142,8 @@ try {
   ok('B kullanır → request_sent', r.status === 200
     && r.json?.status === 'request_sent' && r.json?.role === 'sevgili',
     `→ ${r.status} ${JSON.stringify(r.json)}`);
+  ok('kullanım yanıtı davet edenin hash\'ini verir (yerel kayıt için)',
+    r.json?.inviterHash === A.hash, JSON.stringify(r.json));
 
   let lst = await req('GET', '/api/partner/list', { token: B.token });
   ok('🔴 PARTNERLİK HENÜZ YOK (B)', (lst.json?.partners || []).length === 0,

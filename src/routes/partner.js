@@ -311,9 +311,16 @@ export default async function partnerRoutes(fastify) {
       });
     }
 
+    // inviterHash BAŞARILI kullanımda dönüyor: okuyan kişi artık bekleyen
+    // partner adayı, yerel kaydı bu hash'le kuracak. Telefon akışında da
+    // kabul eden taraf `partner:request.from` ile aynı bilgiyi alıyor.
+    // ⚠️ ÖN İZLEME (GET) bunu DÖNMEZ — orası jetonu yakmadan, onay
+    // alınmadan okunuyor; hash'i orada vermek daveti bir hash sızdırma
+    // ucuna çevirirdi.
     return reply.send({
       status: 'request_sent',
       role: inv.role,
+      inviterHash: inv.inviterHash,
       inviterOnline: !!inviterPeer?.socketId,
     });
   });
