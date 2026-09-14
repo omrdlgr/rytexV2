@@ -86,6 +86,10 @@ COUNTRY = {
     "KR": "G.Kore", "TW": "Tayvan", "HK": "Hong Kong", "SG": "Singapur",
     "AR": "Arjantin", "CL": "Şili", "CO": "Kolombiya", "PE": "Peru",
     "UY": "Uruguay", "IL": "İsrail", "ZA": "G.Afrika",
+    # 2026-09-14: RC'de ilk Ukrayna müşterisi. Allowlist'te YOK —
+    # kullanıcı kriteri: "telefon denemesi gelirse ekleyelim".
+    # Nöbetçi kapalı ülkeden engelleme görünce SORUN satırı üretir.
+    "UA": "Ukrayna",
     "??": "bilinmiyor",
 }
 
