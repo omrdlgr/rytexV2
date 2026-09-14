@@ -34,8 +34,14 @@ export function setupSocket(httpServer) {
 
     // Çevrimdışıyken gelen bekleyen davetleri teslim et — davet göndermek
     // artık hedefin o an online olmasını gerektirmiyor (/partner/connect).
-    for (const from of partnerRequests.pendingFor(userHash)) {
-      socket.emit('partner:request', { from });
+    for (const r of partnerRequests.pendingFor(userHash)) {
+      // viaInvite/role: jetonlu (QR) davetten gelen istekte kabul eden
+      // SAHİP tarafı olur — istemci yönü buradan ayırt eder.
+      socket.emit('partner:request', {
+        from: r.from,
+        viaInvite: r.viaInvite,
+        role: r.role,
+      });
     }
 
     // Partner accepted/rejected the connection request.

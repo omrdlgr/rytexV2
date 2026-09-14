@@ -1,5 +1,6 @@
 import {
   partnerRequests,
+  partnerInvites,
   partnerships,
   dissolvePartnership,
   entitlements,
@@ -10,6 +11,17 @@ import { PARTNER_LIMIT, ENFORCE_PREMIUM } from '../config.js';
 // In-memory store: phoneHash → { socketId, connectedTo }
 // Replace with Redis/DB for multi-instance deployments
 export const peers = new Map();
+
+// Davet jetonu ömrü (kullanıcı kararı 2026-09-14): 1 SAAT.
+// Gerekçe: QR yüz yüze okutuluyor — partner zaten yanında. Kısa ömür,
+// yanlış sohbete düşen bağlantının penceresini de daraltır.
+const INVITE_TTL_MS = 60 * 60 * 1000;
+
+// Geçerli roller — Dart tarafındaki `enum PartnerRole` ile BİREBİR
+// (lib/features/partner/domain/partner_role.dart). Sunucu rolü saklıyor
+// çünkü onay ekranında gösterilecek değerin kaynağı istemci olmamalı:
+// URL'ye yazılmış rol kurcalanabilir, jetona bağlı olan kurcalanamaz.
+const VALID_ROLES = new Set(['es', 'sevgili', 'anne', 'baba']);
 
 export default async function partnerRoutes(fastify) {
   // POST /api/partner/find
@@ -153,5 +165,156 @@ export default async function partnerRoutes(fastify) {
     if (!claims) return;
 
     return reply.send({ partners: partnerships.listFor(claims.sub) });
+  });
+
+  // ── Jetonlu davet (QR / paylaşılabilir bağlantı) ───────────────────
+  //
+  // Telefon akışının aynısı, tek farkı hedefin numarasını bilme şartının
+  // kalkması. ONAY YİNE İKİ TARAFLI: jeton partnerlik KURMAZ, yalnız
+  // sahibe bekleyen istek bırakır (partner_requests) — partnerlik ancak
+  // sahip `partner:accept` ile onaylayınca kurulur. Yani QR yeni bir
+  // yetki yolu açmıyor, mevcut kapıdan geçiyor.
+  //
+  // İkinci kapının SAHİPTE olması bilinçli: QR'ı kimin okuyacağını jeton
+  // bilemez, dolayısıyla anlamlı doğrulama "kim okudu"yu görmektir.
+  // Bağlantı yanlış kişiye düşse bile sahip tanımadığı kaydı reddeder.
+
+  // POST /api/partner/invite
+  // Body: { role: 'es'|'sevgili'|'anne'|'baba' }
+  // Döner: { token, expiresAt, ttlMs }
+  fastify.post('/partner/invite', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    schema: {
+      body: {
+        type: 'object',
+        required: ['role'],
+        properties: {
+          role: { type: 'string', minLength: 2, maxLength: 16 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const claims = authenticateRequest(request, reply);
+    if (!claims) return;
+
+    const inviterHash = claims.sub;
+    const { role } = request.body;
+
+    if (!VALID_ROLES.has(role)) {
+      return reply.code(400).send({ error: 'invalid_role' });
+    }
+
+    // Sınır ve premium kapıları /partner/connect ile AYNI — jetonlu yol
+    // bir atlatma olmamalı.
+    if (partnerships.countFor(inviterHash) >= PARTNER_LIMIT) {
+      return reply
+        .code(409)
+        .send({ error: 'partner_limit_reached', limit: PARTNER_LIMIT });
+    }
+    if (ENFORCE_PREMIUM && !entitlements.isActive(inviterHash)) {
+      return reply.code(402).send({ error: 'premium_required' });
+    }
+
+    const { token, expiresAt } = partnerInvites.create(
+      inviterHash,
+      role,
+      INVITE_TTL_MS,
+    );
+    return reply.send({ token, expiresAt, ttlMs: INVITE_TTL_MS });
+  });
+
+  // GET /api/partner/invite/:token
+  // Yakmadan okur — okuyan kişi onay ekranında hangi rolle bağlanacağını
+  // görsün diye. Kimlik BİLGİSİ DÖNMEZ (davet edenin hash'i sızmaz);
+  // yalnız rol ve geçerlilik.
+  fastify.get('/partner/invite/:token', {
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
+    const claims = authenticateRequest(request, reply);
+    if (!claims) return;
+
+    const inv = partnerInvites.lookup(request.params.token);
+    if (!inv) return reply.code(410).send({ error: 'invite_not_found' });
+    if (inv.used) return reply.code(410).send({ error: 'invite_used' });
+    if (inv.expiresAt <= Date.now()) {
+      return reply.code(410).send({ error: 'invite_expired' });
+    }
+    if (inv.inviterHash === claims.sub) {
+      return reply.code(400).send({ error: 'cannot_connect_to_self' });
+    }
+
+    return reply.send({ role: inv.role, expiresAt: inv.expiresAt });
+  });
+
+  // POST /api/partner/redeem
+  // Body: { token }
+  // Jetonu yakar ve SAHİBE bekleyen istek bırakır. Partnerlik kurulmaz.
+  fastify.post('/partner/redeem', {
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+    schema: {
+      body: {
+        type: 'object',
+        required: ['token'],
+        properties: {
+          token: { type: 'string', minLength: 16, maxLength: 128 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const claims = authenticateRequest(request, reply);
+    if (!claims) return;
+
+    const redeemerHash = claims.sub;
+    const { token } = request.body;
+
+    const inv = partnerInvites.lookup(token);
+    if (!inv) return reply.code(410).send({ error: 'invite_not_found' });
+    if (inv.used) return reply.code(410).send({ error: 'invite_used' });
+    if (inv.expiresAt <= Date.now()) {
+      return reply.code(410).send({ error: 'invite_expired' });
+    }
+    if (inv.inviterHash === redeemerHash) {
+      return reply.code(400).send({ error: 'cannot_connect_to_self' });
+    }
+    if (partnerships.isPartner(inv.inviterHash, redeemerHash)) {
+      return reply.code(409).send({ error: 'already_partners' });
+    }
+    // Sınır DAVET EDENDE sayılır (paylaşımı hep sahip başlatır) ve burada
+    // TEKRAR bakılır: jeton üretimiyle okuma arasında dolmuş olabilir.
+    if (partnerships.countFor(inv.inviterHash) >= PARTNER_LIMIT) {
+      return reply
+        .code(409)
+        .send({ error: 'partner_limit_reached', limit: PARTNER_LIMIT });
+    }
+    if (ENFORCE_PREMIUM && !entitlements.isActive(inv.inviterHash)) {
+      return reply.code(402).send({ error: 'premium_required' });
+    }
+
+    // Yakma koşullu — aynı jetonu iki kişi okuduysa yalnız biri geçer.
+    if (!partnerInvites.burn(token, redeemerHash)) {
+      return reply.code(410).send({ error: 'invite_used' });
+    }
+
+    // Yön TERS: isteği okuyan bırakır, SAHİP kabul eder.
+    partnerRequests.create(redeemerHash, inv.inviterHash, {
+      viaInvite: true,
+      role: inv.role,
+    });
+
+    const inviterPeer = peers.get(inv.inviterHash);
+    const io = fastify.io;
+    if (io && inviterPeer?.socketId) {
+      io.to(inviterPeer.socketId).emit('partner:request', {
+        from: redeemerHash,
+        viaInvite: true,
+        role: inv.role,
+      });
+    }
+
+    return reply.send({
+      status: 'request_sent',
+      role: inv.role,
+      inviterOnline: !!inviterPeer?.socketId,
+    });
   });
 }

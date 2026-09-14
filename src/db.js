@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { ALLOW_SANDBOX_ENTITLEMENTS } from './config.js';
@@ -137,6 +138,52 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_revoked_exp     ON revoked_tokens(exp);
 `);
 
+// ── QR/bağlantı davet jetonları (2026-09-14) ────────────────────────
+//
+// Telefon akışı hedefin NUMARASINI bilmeyi şart koşuyor. Jetonlu davet o
+// şartı kaldırır: sahip bir jeton üretir, QR olarak gösterir, okuyan kişi
+// jetonu kullanıp SAHİBE bekleyen istek bırakır. Onay yine İKİ TARAFLI —
+// jeton tek başına partnerlik KURMAZ, yalnız partner_requests satırı açar
+// ve sahip kabul edene kadar hiçbir veri akmaz.
+//
+// ⚠️ JETON phoneHash TAŞIMAZ. Eşleme sunucuda yapılır; aksi halde davet
+// bağlantısı hash sızdırırdı ve 2026-08-11 denetimindeki phoneHash
+// numaralandırma riski geri açılırdı.
+//
+// ⚠️ HAM JETON SAKLANMAZ, SHA-256'sı saklanır. DB/yedek sızarsa okunan
+// satırla davet kullanılamaz — parola saklamanın aynı gerekçesi. Ömrü 1
+// saat ve tek kullanımlık olsa bile bedava sertlik.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS partner_invites (
+    token_hash    TEXT PRIMARY KEY,
+    inviter_hash  TEXT NOT NULL,
+    role          TEXT NOT NULL,
+    created_at    INTEGER NOT NULL,
+    expires_at    INTEGER NOT NULL,
+    used_at       INTEGER,
+    redeemer_hash TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_invite_exp ON partner_invites(expires_at);
+`);
+
+// partner_requests'e iki sütun (migration — tablo eski kurulumlarda var).
+//
+// NEDEN GEREKLİ: telefon akışında isteği SAHİP gönderir, izleyici kabul
+// eder. Jetonlu akışta yön TERS — isteği okuyan kişi bırakır, sahip kabul
+// eder ve kabul ederken SAHİP tarafı olur (outgoing). İstemci bu ayrımı
+// ancak isteğin kaynağını bilirse yapabilir; çevrimdışı sahibe yeniden
+// bağlanışta teslim edilen istekte de bilinmeli, yani bayrak olayda değil
+// SATIRDA durmalı.
+{
+  const _cols = db.prepare('PRAGMA table_info(partner_requests)').all().map((c) => c.name);
+  if (!_cols.includes('via_invite')) {
+    db.exec('ALTER TABLE partner_requests ADD COLUMN via_invite INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!_cols.includes('role')) {
+    db.exec('ALTER TABLE partner_requests ADD COLUMN role TEXT');
+  }
+}
+
 const _insert = db.prepare(
   'INSERT INTO users (phone_hash, password_hash, created_at) VALUES (?, ?, ?)',
 );
@@ -170,8 +217,12 @@ export const userStore = {
 // ── Partner istek / partnership deposu ──────────────────────────────
 
 const _reqInsert = db.prepare(
-  `INSERT INTO partner_requests (from_hash, to_hash, created_at) VALUES (?, ?, ?)
-   ON CONFLICT(from_hash, to_hash) DO UPDATE SET created_at = excluded.created_at`,
+  `INSERT INTO partner_requests (from_hash, to_hash, created_at, via_invite, role)
+   VALUES (?, ?, ?, ?, ?)
+   ON CONFLICT(from_hash, to_hash) DO UPDATE SET
+     created_at = excluded.created_at,
+     via_invite = excluded.via_invite,
+     role       = excluded.role`,
 );
 const _reqGet = db.prepare(
   'SELECT 1 FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
@@ -180,18 +231,32 @@ const _reqDelete = db.prepare(
   'DELETE FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
 );
 const _reqPendingFor = db.prepare(
-  'SELECT from_hash FROM partner_requests WHERE to_hash = ? ORDER BY created_at',
+  `SELECT from_hash, via_invite, role FROM partner_requests
+   WHERE to_hash = ? ORDER BY created_at`,
 );
 
 export const partnerRequests = {
-  // requester → target istek attı
-  create(fromHash, toHash) {
-    _reqInsert.run(fromHash, toHash, Date.now());
+  // requester → target istek attı.
+  // [opts.viaInvite] jetonlu (QR) davetten geldi → kabul eden SAHİP tarafı
+  // olur. [opts.role] sahibin jetonu üretirken seçtiği rol.
+  create(fromHash, toHash, opts = {}) {
+    _reqInsert.run(
+      fromHash,
+      toHash,
+      Date.now(),
+      opts.viaInvite ? 1 : 0,
+      opts.role ?? null,
+    );
   },
-  // Bu kullanıcıya bekleyen isteklerin gönderenleri — çevrimdışıyken gelen
-  // davetlerin bağlantı anında teslimi için (socket.js).
+  // Bu kullanıcıya bekleyen istekler — çevrimdışıyken gelen davetlerin
+  // bağlantı anında teslimi için (socket.js). Nesne döner: bayrak olayın
+  // kendisinde değil satırda durduğu için yeniden bağlanışta da taşınır.
   pendingFor(toHash) {
-    return _reqPendingFor.all(toHash).map((r) => r.from_hash);
+    return _reqPendingFor.all(toHash).map((r) => ({
+      from: r.from_hash,
+      viaInvite: r.via_invite === 1,
+      role: r.role ?? null,
+    }));
   },
   // toHash, fromHash'ten bekleyen istek var mı?
   has(fromHash, toHash) {
@@ -199,6 +264,60 @@ export const partnerRequests = {
   },
   delete(fromHash, toHash) {
     _reqDelete.run(fromHash, toHash);
+  },
+};
+
+// ── Davet jetonu deposu (QR / paylaşılabilir bağlantı) ──────────────
+
+const _invInsert = db.prepare(
+  `INSERT INTO partner_invites
+     (token_hash, inviter_hash, role, created_at, expires_at)
+   VALUES (?, ?, ?, ?, ?)`,
+);
+const _invGet = db.prepare(
+  'SELECT * FROM partner_invites WHERE token_hash = ?',
+);
+// Yakma KOŞULLU: yalnız kullanılmamış ve süresi geçmemiş jeton yakılabilir.
+// changes===0 → başkası önce davrandı (yarış) ya da jeton zaten ölü.
+const _invBurn = db.prepare(
+  `UPDATE partner_invites SET used_at = ?, redeemer_hash = ?
+   WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?`,
+);
+// Ölü jetonlar tabloda birikmesin. Kullanılmış satırı da atıyoruz: tek
+// kullanımlık jetonun tekrar denenmesi zaten süresi geçmiş muamelesi görür.
+const _invPrune = db.prepare('DELETE FROM partner_invites WHERE expires_at <= ?');
+
+function _hashToken(token) {
+  return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+export const partnerInvites = {
+  /// Yeni jeton üret. Ham jeton YALNIZ burada görülür, saklanmaz.
+  create(inviterHash, role, ttlMs) {
+    const now = Date.now();
+    _invPrune.run(now); // tembel temizlik
+    const token = randomBytes(32).toString('base64url');
+    const expiresAt = now + ttlMs;
+    _invInsert.run(_hashToken(token), inviterHash, role, now, expiresAt);
+    return { token, expiresAt };
+  },
+  /// Yakmadan oku (onay ekranında rolü göstermek için).
+  /// Döner: null | { inviterHash, role, expiresAt, used }
+  lookup(token) {
+    const row = _invGet.get(_hashToken(token));
+    if (!row) return null;
+    return {
+      inviterHash: row.inviter_hash,
+      role: row.role,
+      expiresAt: row.expires_at,
+      used: row.used_at !== null,
+    };
+  },
+  /// Tek kullanımlık yakma. true → bu çağrı jetonu tüketti.
+  burn(token, redeemerHash) {
+    const now = Date.now();
+    const res = _invBurn.run(now, redeemerHash, _hashToken(token), now);
+    return res.changes === 1;
   },
 };
 
