@@ -294,11 +294,20 @@ def firebase_stats() -> tuple[int, list]:
 # kör bir kaynakla verdik (MX ve RU'da tesadüfen doğru çıktı, VE tamamen
 # kaçtı). Engellenen SMS, duvara çarpan insanın TEK doğrudan kanıtıdır.
 #
-# ⚠️ İKİNCİ İŞLEV — SMS POMPALAMA ERKEN UYARISI. Allowlist 55 ülkeye
-# çıktı ama reCAPTCHA istemcide SDK olmadığı için pratikte ÖLÇÜM YAPMIYOR
-# (token_count = verdict_count = 0), yani toll-fraud BLOCK@0.8 kuralı da
-# hiçbir şeye bakmıyor. $10 kill-switch fatura gecikmesiyle tetiklenir →
-# saldırıyı 24 saat sonra öğrenirdik. Bu sayaç saat başı okunur.
+# ⚠️ İKİNCİ İŞLEV — SMS POMPALAMA ERKEN UYARISI, VE ARTIK TEK GERÇEK SAYAÇ.
+#
+# 🔴 GÜNCELLEME 2026-09-15: reCAPTCHA **KAPATILDI** (phoneEnforcementState
+# OFF, useSmsTollFraudProtection False). Sebep saha hatası: 1.2.4 Android'e
+# reCAPTCHA SDK'sıyla çıkınca token üretilmeye başladı ama `invalid` geldi
+# (token_count android: invalid ×3), testçi giriş yapamadı, SMS hiç gitmedi.
+# Bugüne kadar toll-fraud kuralı zaten hiçbir şeye bakmıyordu (token yoktu);
+# şimdi bilinçli olarak kapalı. Yeniden açmadan önce: (1) invalid token'ın
+# kökü — ANDROID anahtarının paket/SHA eşleşmesi, (2) iOS SDK derleme sorunu.
+#
+# Yani SMS pompalamasına karşı kalan savunma: allowlist (56 ülke) + 500/gün
+# kayıt kotası + $10 kill-switch. Kill-switch fatura gecikmesiyle tetiklenir
+# → saldırıyı 24 saat sonra öğrenirdik. **Bu sayaç saat başı okunur ve artık
+# erken uyarının tek kaynağı.**
 #
 # ⚠️ HAM NOKTA TOPLAMI DOĞRU: iki metrik de metricKind=DELTA (API'den
 # okundu, varsayılmadı) — her nokta o aralığın FARKIDIR, CUMULATIVE değil.
