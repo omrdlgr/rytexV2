@@ -166,6 +166,63 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_invite_exp ON partner_invites(expires_at);
 `);
 
+// ── TEK AKTİF OTURUM ────────────────────────────────────────────────
+//
+// Kimlik başına O ANKİ geçerli JWT. Yeni cihazda giriş yapılınca eskisi
+// iptal edilir (bkz. routes/auth.js /verify-phone).
+//
+// 🔴 NEDEN GEREKLİ — İKİ AYRI SEBEP:
+//
+// (1) ÇALINAN/KAYBOLAN TELEFON. JWT ömrü 30 gün. Eskiden yeni telefona
+//     geçmek eski oturumu KAPATMIYORDU; çalınan cihaz bir ay boyunca
+//     partnerlerin paylaştığı sağlık verisini almaya ve SPARK bildirimi
+//     görmeye devam ediyordu. Kullanıcının eski cihaza erişimi olmadığı
+//     için elle çıkış da yapamıyordu. Artık yeni giriş eskisini kesiyor —
+//     eski cihaza dokunmaya, hatta açık olmasına gerek yok.
+//
+// (2) İKİ CİHAZ BİRBİRİNİ BOZUYORDU. X25519 ÖZEL anahtarı cihaz yereldir;
+//     ikinci cihaz kendi çiftini üretip `PUT /keys` ile ortak anahtarı
+//     EZİYOR. Partnerler bundan sonra yeni anahtarla şifreliyor ve ilk
+//     cihaz yeni paylaşımları ÇÖZEMİYOR — ama önbellekteki eski veriyi
+//     göstermeye devam ettiği için bozulma SESSİZ kalıyordu. `push_tokens`
+//     de kimlik başına tek satır, yani bildirim zaten son cihaza gidiyordu.
+//     Mimari baştan "bir kimlik = bir cihaz" varsayıyordu; bu tablo o
+//     varsayımı açık hale getiriyor.
+//
+// ⚠️ Premium sızıntısı BU DEĞİŞİKLİĞİN AMACI DEĞİL, yan sonucu. Kötüye
+// kullanım için SMS kodunu paylaşmak gerekiyor (numara sahibinin rızası)
+// ve iki cihaz zaten birbirini bozuyordu.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS active_sessions (
+    phone_hash TEXT PRIMARY KEY,
+    jti        TEXT NOT NULL,
+    exp        INTEGER NOT NULL,   -- JWT exp claim'i (saniye)
+    updated_at INTEGER NOT NULL
+  );
+`);
+
+const _asGet = db.prepare('SELECT jti, exp FROM active_sessions WHERE phone_hash = ?');
+const _asSet = db.prepare(
+  `INSERT INTO active_sessions (phone_hash, jti, exp, updated_at) VALUES (?, ?, ?, ?)
+   ON CONFLICT(phone_hash) DO UPDATE SET
+     jti = excluded.jti, exp = excluded.exp, updated_at = excluded.updated_at`,
+);
+const _asDel = db.prepare('DELETE FROM active_sessions WHERE phone_hash = ?');
+
+export const activeSessions = {
+  /// Yeni oturumu yaz, ÖNCEKİNİ döndür (yoksa null). Çağıran önceki
+  /// jti'yi iptal listesine ekler.
+  replace(phoneHash, jti, exp) {
+    const prev = _asGet.get(phoneHash) || null;
+    _asSet.run(phoneHash, jti, exp, Date.now());
+    return prev;
+  },
+  /// Çıkış/hesap silme sonrası satırı temizle.
+  clear(phoneHash) {
+    _asDel.run(phoneHash);
+  },
+};
+
 // partner_requests'e iki sütun (migration — tablo eski kurulumlarda var).
 //
 // NEDEN GEREKLİ: telefon akışında isteği SAHİP gönderir, izleyici kabul
@@ -717,6 +774,10 @@ const _accUserDelete = db.prepare('DELETE FROM users WHERE phone_hash = ?');
 // yoktur (politika §14: gönderilmiş anonim sayılar geri bağlanamaz).
 // Idempotent: kayıt yoksa da sessizce geçer.
 export const deleteAccount = db.transaction((hash) => {
+  // Aktif oturum kaydı da gitsin: kalsaydı aynı numarayla yeniden kayıt
+  // olan kullanıcının ilk girişinde, silinmiş hesaba ait bayat bir jti
+  // iptal listesine yazılırdı.
+  _asDel.run(hash);
   _accReqDelete.run(hash, hash);
   _accPartDelete.run(hash, hash);
   _accShDelete.run(hash, hash);

@@ -12,6 +12,16 @@ export function signToken(sub) {
   return jwt.sign({ sub, jti: randomUUID() }, JWT_SECRET, { expiresIn: TTL });
 }
 
+/// Token + claim'leri birlikte döner. `/verify-phone` önceki oturumu iptal
+/// edebilmek için yeni `jti`/`exp`'i bilmek zorunda; token'ı imzalayıp
+/// sonra tekrar çözmek yerine tek yerde üretiliyor.
+export function newSession(sub) {
+  const jti = randomUUID();
+  const token = jwt.sign({ sub, jti }, JWT_SECRET, { expiresIn: TTL });
+  const { exp } = jwt.decode(token);
+  return { token, jti, exp };
+}
+
 // Geçerli claims döner; imza/expiry hatası veya iptal edilmişse fırlatır.
 export function verifyToken(token) {
   const claims = jwt.verify(token, JWT_SECRET); // bozuk/expired → throw

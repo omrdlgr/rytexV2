@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { userStore, pushTokens, partnerships, deleteAccount } from '../db.js';
-import { signToken, revokeToken, authenticateRequest } from '../token.js';
+import { activeSessions, userStore, pushTokens, partnerships, deleteAccount } from '../db.js';
+import { newSession, revokeToken, authenticateRequest } from '../token.js';
 import { verifyPhoneToken } from '../firebase.js';
 import { reconcileEntitlement } from '../entitlement_sync.js';
 import { peers } from './partner.js';
@@ -44,7 +44,21 @@ export default async function authRoutes(fastify) {
     }
     const phoneHash = phoneHashOf(phone);
     userStore.ensurePhone(phoneHash);
-    const token = signToken(phoneHash);
+
+    // 🔴 TEK AKTİF OTURUM: yeni cihazda giriş, ESKİ cihazın oturumunu kapatır.
+    //
+    // Tetikleyici eski cihazdan çıkış DEĞİL, buradaki yeni giriş — yani
+    // telefon çalındıysa/bozulduysa da çalışır; eski cihaza dokunmak, hatta
+    // açık olması gerekmiyor. Eskiden JWT 30 gün geçerliydi ve çalınan cihaz
+    // o süre boyunca partnerlerin sağlık verisini almaya devam ediyordu.
+    //
+    // İkinci sebep: X25519 özel anahtarı cihaz yerel; ikinci cihaz `PUT /keys`
+    // ile ortak anahtarı ezip ilk cihazın yeni paylaşımları çözmesini SESSİZCE
+    // bozuyordu (önbellekteki eski veri görünmeye devam ettiği için fark
+    // edilmiyordu). Mimari zaten "bir kimlik = bir cihaz" varsayıyordu.
+    const { token, jti, exp } = newSession(phoneHash);
+    const prev = activeSessions.replace(phoneHash, jti, exp);
+    if (prev) revokeToken(prev); // {jti, exp} — logout ile aynı yol
 
     // Hak uzlaştırması — girişte RevenueCat'e GERÇEK durumu sor.
     //
@@ -66,6 +80,9 @@ export default async function authRoutes(fastify) {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;
     revokeToken(claims);
+    // Aktif oturum kaydını da düş — yoksa bir sonraki girişte ZATEN iptal
+    // edilmiş bir jti yeniden iptal listesine yazılırdı (zararsız ama kirli).
+    activeSessions.clear(claims.sub);
     // Çıkan kullanıcıya artık push gitmesin (cihaz başkasına geçebilir).
     pushTokens.delete(claims.sub);
     return reply.send({ status: 'logged_out' });
