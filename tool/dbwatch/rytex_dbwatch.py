@@ -44,6 +44,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
@@ -113,12 +114,46 @@ WATCHED = ["users", "partnerships", "entitlements", "public_keys"]
 COUNTED = WATCHED + ["sparks", "shares", "partner_requests", "push_tokens"]
 
 
-def sh(args: list[str], timeout: int = 180) -> str:
-    r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-    if r.returncode != 0:
-        raise RuntimeError(f"{' '.join(args[:3])}… çıkış {r.returncode}: "
-                           f"{(r.stderr or r.stdout).strip()[:300]}")
-    return r.stdout
+# 🔴 `fly` KOMUTLARI BİR KEZ YENİDEN DENENİR (2026-09-17).
+#
+# NEDEN: 17 Eylül 12:00 koşusunda `fly ssh console` 180 sn'de zaman aşımına
+# uğradı ve KIRMIZI ALARM üretti. Ölçüldü: makine `started`, health 200
+# (0,28 sn), SSH 5 dakika sonra 5,2 sn'de cevap verdi, `quick_check` ok.
+# Yani sorun sunucuda değil, Fly'ın wireguard/SSH tünelinin o an
+# kurulamamasıydı — geçici ve kendi kendine geçen bir arıza.
+#
+# ⚠️ SAHTE ALARM, NÖBETÇİNİN EN DEĞERLİ ÖZELLİĞİNİ AŞINDIRIR. Dosyada zaten
+# "sonsuz alarm bilerek yok, yoksa gerçek sorunlar gürültüde kaybolur" diye
+# yazıyor; tünel hıçkırığı için kırmızı mesaj atmak aynı zararı veriyor.
+#
+# ⚠️ GERÇEK ARIZAYI MASKELEMİYOR: kalıcı sorunda iki deneme de düşer ve
+# sorun yine bildirilir. Yalnızca "bir kerelik takılma" elenmiş olur.
+#
+# ⚠️ YALNIZ `fly` KOMUTLARINDA, ve hepsinin İDEMPOTENT olduğu kontrol edildi:
+# kanarya `ON CONFLICT DO UPDATE` (upsert) · `VACUUM INTO` öncesinde hedef
+# dosyayı siliyor · `sftp get` ve `rm -f` idempotent · `volumes list` salt
+# okuma. `age` şifrelemesi ağ komutu DEĞİL, tekrar denenmiyor.
+# 👉 Buraya idempotent OLMAYAN bir fly komutu eklenirse `retries=0` verilmeli.
+def sh(args: list[str], timeout: int = 180, retries: int | None = None) -> str:
+    if retries is None:
+        retries = 1 if args and args[0] == "fly" else 0
+    last: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            r = subprocess.run(args, capture_output=True, text=True,
+                               timeout=timeout)
+            if r.returncode != 0:
+                raise RuntimeError(
+                    f"{' '.join(args[:3])}… çıkış {r.returncode}: "
+                    f"{(r.stderr or r.stdout).strip()[:300]}")
+            return r.stdout
+        except (subprocess.TimeoutExpired, RuntimeError) as e:
+            last = e
+            if attempt == retries:
+                break
+            # Tünelin yeniden kurulmasına zaman tanı.
+            time.sleep(20)
+    raise last  # type: ignore[misc]
 
 
 # ── 1. Sunucu tarafı: kanarya + hızlı kontrol + tutarlı kopya ───────────
