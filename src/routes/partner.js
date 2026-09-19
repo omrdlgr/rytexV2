@@ -3,8 +3,7 @@ import {
   partnerInvites,
   partnerships,
   dissolvePartnership,
-  entitlements,
-} from '../db.js';
+  entitlements, REQUEST_TTL_MS } from '../db.js';
 import { authenticateRequest } from '../token.js';
 import { PARTNER_LIMIT, ENFORCE_PREMIUM } from '../config.js';
 
@@ -123,9 +122,13 @@ export default async function partnerRoutes(fastify) {
       });
     }
 
+    // ⚠️ SÜRE SUNUCUDAN DÖNÜYOR, istemciye GÖMÜLMÜYOR. "7 gün" 14 çeviriye
+    // yazılsaydı politika değiştiğinde 14 dil birden bayatlardı — QR
+    // ekranında tam bu tuzağa düşmüştük ("Geçerlilik: 10080 dk").
     return reply.send({
       status: 'request_sent',
       online: !!partnerPeer?.socketId,
+      ttlMs: REQUEST_TTL_MS,
     });
   });
 
