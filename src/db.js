@@ -281,22 +281,41 @@ const _reqInsert = db.prepare(
      via_invite = excluded.via_invite,
      role       = excluded.role`,
 );
+// Bekleyen davetin ömrü. Eskiden SÜRESİZDİ: uygulaması olmayan birine
+// davet atılınca satır sonsuza kadar kalıyordu (kullanıcı sorusu
+// 2026-09-19). İki sebeple sınırlandı:
+//   • depolama sınırsız büyüyordu ve anahtarı, uygulamayı hiç kullanmamış
+//     birinin telefon hash'iydi — o kişinin haberi olmadan süresiz duran
+//     kişisel veri (KVKK/GDPR),
+//   • QR daveti 1 saatte ölürken telefon daveti hiç ölmüyordu; aynı işlev
+//     iki farklı politika taşıyordu.
+// Kullanıcı kararı: ikisi de 7 GÜN.
+export const REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+// ⚠️ SÜRE HER OKUMADA UYGULANIR, yalnız listelemede değil. `has()` süreye
+// bakmazsa süresi geçmiş istek HÂLÂ KABUL EDİLEBİLİR olurdu ve TTL
+// yalnızca görünürde kalırdı — `partner:accept` doğrulamayı buradan yapıyor.
 const _reqGet = db.prepare(
-  'SELECT 1 FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
+  `SELECT 1 FROM partner_requests
+   WHERE from_hash = ? AND to_hash = ? AND created_at >= ?`,
 );
 const _reqDelete = db.prepare(
   'DELETE FROM partner_requests WHERE from_hash = ? AND to_hash = ?',
 );
 const _reqPendingFor = db.prepare(
   `SELECT from_hash, via_invite, role FROM partner_requests
-   WHERE to_hash = ? ORDER BY created_at`,
+   WHERE to_hash = ? AND created_at >= ? ORDER BY created_at`,
 );
+// Süresi geçmiş satırlar yazma anında budanır (revoked_tokens ile aynı
+// desen) — ayrı bir zamanlayıcı kurmadan depolama sınırlı kalır.
+const _reqPrune = db.prepare('DELETE FROM partner_requests WHERE created_at < ?');
 
 export const partnerRequests = {
   // requester → target istek attı.
   // [opts.viaInvite] jetonlu (QR) davetten geldi → kabul eden SAHİP tarafı
   // olur. [opts.role] sahibin jetonu üretirken seçtiği rol.
   create(fromHash, toHash, opts = {}) {
+    _reqPrune.run(Date.now() - REQUEST_TTL_MS);
     _reqInsert.run(
       fromHash,
       toHash,
@@ -309,7 +328,7 @@ export const partnerRequests = {
   // bağlantı anında teslimi için (socket.js). Nesne döner: bayrak olayın
   // kendisinde değil satırda durduğu için yeniden bağlanışta da taşınır.
   pendingFor(toHash) {
-    return _reqPendingFor.all(toHash).map((r) => ({
+    return _reqPendingFor.all(toHash, Date.now() - REQUEST_TTL_MS).map((r) => ({
       from: r.from_hash,
       viaInvite: r.via_invite === 1,
       role: r.role ?? null,
@@ -317,7 +336,7 @@ export const partnerRequests = {
   },
   // toHash, fromHash'ten bekleyen istek var mı?
   has(fromHash, toHash) {
-    return _reqGet.get(fromHash, toHash) !== undefined;
+    return _reqGet.get(fromHash, toHash, Date.now() - REQUEST_TTL_MS) !== undefined;
   },
   delete(fromHash, toHash) {
     _reqDelete.run(fromHash, toHash);

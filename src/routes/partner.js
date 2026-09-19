@@ -15,7 +15,14 @@ export const peers = new Map();
 // Davet jetonu ömrü (kullanıcı kararı 2026-09-14): 1 SAAT.
 // Gerekçe: QR yüz yüze okutuluyor — partner zaten yanında. Kısa ömür,
 // yanlış sohbete düşen bağlantının penceresini de daraltır.
-const INVITE_TTL_MS = 60 * 60 * 1000;
+// Jeton ömrü. 15 Eylül'de 1 saatti (kullanıcı kararı: "24 saat uzun").
+// 19 Eylül'de 7 GÜNE çıkarıldı — telefon daveti de 7 gün oldu, aynı işlev
+// iki farklı politika taşımasın (bkz. REQUEST_TTL_MS).
+// ⚠️ Pencere 168 kat uzadı. Kabul edilebilir olmasının sebebi jetonun tek
+// başına hiçbir şey kurmaması: partnerlik SAHİP onaylayınca doğuyor, yani
+// kare sızsa bile ikinci kapı duruyor. Jeton phoneHash taşımıyor ve ham
+// hâli saklanmıyor (SHA-256'sı saklanıyor).
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Geçerli roller — Dart tarafındaki `enum PartnerRole` ile BİREBİR
 // (lib/features/partner/domain/partner_role.dart). Sunucu rolü saklıyor

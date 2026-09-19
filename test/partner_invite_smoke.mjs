@@ -101,7 +101,11 @@ try {
   const ttl = r.json?.expiresAt - Date.now();
   ok('jeton üretildi (200)', r.status === 200 && typeof token1 === 'string',
     `→ ${r.status}`);
-  ok('ömür ~1 saat', ttl > 59 * 60_000 && ttl <= 60 * 60_000, `→ ${ttl}ms`);
+  // Politika 19 Eylül'de 1 saatten 7 GÜNE çıktı (telefon davetiyle aynı
+  // ömür olsun diye). Bu satır politikayı KİLİTLER — değeri kazara
+  // oynatan bir değişiklik burada düşer, nitekim düştü.
+  ok('ömür ~7 gün', ttl > 6.9 * 24 * 60 * 60_000 && ttl <= 7 * 24 * 60 * 60_000,
+    `→ ${ttl}ms`);
 
   console.log('\nHAM JETON DİSKTE DEĞİL (sızıntı sertleştirmesi)');
   {
