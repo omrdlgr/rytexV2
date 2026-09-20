@@ -312,7 +312,40 @@ def rc_flag() -> tuple[int, dict]:
     for i in items:
         c = i.get("last_seen_country") or "??"
         dist[c] = dist.get(c, 0) + 1
-    return len(items), dist
+
+    # PLATFORM + BUGÜNKÜ YENİLER (kullanıcı isteği 2026-09-20: "android ve
+    # iOS ayrı gelsin, ben ayırt edemiyorum"). Tek bir toplam sayı iki farklı
+    # hikâyeyi gizliyordu: 20 Eylül'de gelen 10 kişinin yarısı mağazadan,
+    # yarısı kendi testçilerimizdi ve rapor ikisini ayırt ettirmiyordu.
+    #
+    # ⚠️ "TESTÇİ" DİYE SABİT SÜRÜM YAZILMADI, bilinçli: koda "1.2.4 = testçi"
+    # yazmak bir sonraki yayında SESSİZCE yanlışa döner (bu depoda
+    # `play_upload_aab.py`'nin sabit sürüm adı ve `asc_state.py`'nin sabit
+    # "1.2.1"i tam bu şekilde bayatlamıştı). Onun yerine bugünkü yenilerin
+    # HAM sürüm dağılımı basılıyor — okuyan hangisinin mağazada olduğunu
+    # zaten biliyor, satır ise hiçbir zaman bayatlamıyor.
+    plat: dict = {}
+    today: dict = {"n": 0, "plat": {}, "ver": {}}
+    now_ms = time.time() * 1000
+    # ⚠️ GÜN SINIRI UTC — RC PANOSUYLA AYNI OLSUN DİYE.
+    # Önce yerel gün yazmıştım (rapor yerel saatle okunuyor diye). YANLIŞ
+    # TERCİHTİ: kullanıcı bu sayıyı RevenueCat panosundaki "First seen after
+    # or on" filtresiyle karşılaştırıyor ve pano UTC sayıyor. 20 Eylül'de
+    # yerel gün 13, pano 10 dedi — aynı gerçeğin iki sayısı, okuyan için
+    # "nöbetçi bozuk" demek. Tutarsız sayı, eksik sayıdan beterdir.
+    gun_basi = (datetime.now(timezone.utc)
+                .replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+    for i in items:
+        pl = (i.get("last_seen_platform") or "?").lower()
+        pl = {"ios": "iOS", "android": "Android"}.get(pl, pl)
+        plat[pl] = plat.get(pl, 0) + 1
+        fs = i.get("first_seen_at")
+        if isinstance(fs, (int, float)) and gun_basi <= fs <= now_ms:
+            today["n"] += 1
+            today["plat"][pl] = today["plat"].get(pl, 0) + 1
+            v = i.get("last_seen_app_version") or "?"
+            today["ver"][v] = today["ver"].get(v, 0) + 1
+    return len(items), dist, {"plat": plat, "today": today}
 
 
 def _google_token() -> str:
@@ -666,10 +699,11 @@ def main() -> int:
 
         prev_state = json.loads(STATE.read_text()) if STATE.exists() else {}
         rc_total, rc_dist = 0, {}
+        rc_more: dict = {}
         fb_users, regions = -1, []
         rc_ok = fb_ok = False
         try:
-            rc_total, rc_dist = rc_flag()
+            rc_total, rc_dist, rc_more = rc_flag()
             rc_ok = True
         except Exception as e:                              # noqa: BLE001
             # ⚠️ SEBEP DE YAZILIYOR. 20 Eylül'de bu satır yalnız
@@ -739,6 +773,16 @@ def main() -> int:
             top = sorted(rc_dist.items(), key=lambda x: -x[1])
             lines.append("")
             lines.append(f"🚩 RC {rc_total} müşteri{delta('rc', rc_total)}")
+            pl = (rc_more or {}).get("plat") or {}
+            if pl:
+                lines.append("📲 " + " · ".join(
+                    f"{k} {v}" for k, v in sorted(pl.items(), key=lambda x: -x[1])))
+            td = (rc_more or {}).get("today") or {}
+            if td.get("n"):
+                lines.append(f"🆕 bugün (UTC) {td['n']} → " + " · ".join(
+                    f"{k} {v}" for k, v in sorted(td["plat"].items(), key=lambda x: -x[1])))
+                lines.append("   sürüm: " + " · ".join(
+                    f"{k} ×{v}" for k, v in sorted(td["ver"].items(), reverse=True)))
             for c, n in top:
                 lines.append(f"{_country(c)}: {n}")
             lines.append(f"allowlist dışında: {len(outside)}")
