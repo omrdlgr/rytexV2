@@ -587,8 +587,9 @@ DEADLINES = [
     # doğrulanacak: auto-renew açık olması kart olduğunu KANITLAMAZ, kartsız
     # yenileme denemesi başarısız olur ve sonuç aynı yere çıkar.
     ("2027-07-08", "Apple Developer üyelik yenilemesi",
-     "Auto-renew AÇIK (20.09.2026 ekranı). Yenileme başarısız olursa "
-     "uygulamalar App Store'dan düşer — kartın geçerliliği kontrol edilmeli."),
+     "Auto-renew AÇIK, kart kayıtlı (Visa ••••8562, yeni ve süresi uzun — "
+     "20.09.2026 teyidi). Beklenen davranış: kendiliğinden yenilenir. "
+     "Satır yalnız hatırlatma; yenilenmezse uygulamalar App Store'dan düşer."),
 ]
 
 # Raporda görünmeye başladığı eşik, "sorun" sayıldığı eşik ve geçtikten
