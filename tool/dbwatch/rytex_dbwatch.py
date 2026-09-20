@@ -579,9 +579,16 @@ DEADLINES = [
      "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
      "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
      "analizi gerekir."),
-    ("2027-07-07", "Apple Developer üyelik yenilemesi",
-     "Hesapta kayıtlı kart YOK. Yenilenmezse uygulamalar App Store'dan "
-     "düşer."),
+    # ⚠️ TARİH VE DURUM EKRANDAN OKUNDU (2026-09-20), varsayılmadı:
+    # developer.apple.com → Membership details → Renewal date **8 Temmuz 2027**
+    # (kayıtta 7'siydi), ücret TR1029, **Auto-renew AÇIK**. Eski not "kart YOK,
+    # oto-yenilenmeyecek" diyordu — o Ağustos'taki uyarıya dayanıyordu ve
+    # bugünkü ekranla ÇELİŞİYOR. Kartın dosyada olup olmadığı ayrıca
+    # doğrulanacak: auto-renew açık olması kart olduğunu KANITLAMAZ, kartsız
+    # yenileme denemesi başarısız olur ve sonuç aynı yere çıkar.
+    ("2027-07-08", "Apple Developer üyelik yenilemesi",
+     "Auto-renew AÇIK (20.09.2026 ekranı). Yenileme başarısız olursa "
+     "uygulamalar App Store'dan düşer — kartın geçerliliği kontrol edilmeli."),
 ]
 
 # Raporda görünmeye başladığı eşik, "sorun" sayıldığı eşik ve geçtikten
