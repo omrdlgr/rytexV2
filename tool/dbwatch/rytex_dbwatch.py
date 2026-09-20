@@ -664,6 +664,11 @@ def main() -> int:
         except Exception:                                   # noqa: BLE001
             pass                       # bozuk state = imza yok = bir kez bildir
 
+    # 🎉 İYİ HABER DE ANINDA GİTMELİ (kullanıcı kararı 2026-09-20).
+    # Nöbetçi bugüne dek yalnız SORUNU anında bildiriyordu; sorun yoksa
+    # susuyor ve satır ancak 10:00/21:00 raporunda görünüyordu. İlk gerçek
+    # satış 11 saate kadar geç öğrenilebilirdi. Bu bayrak susturmayı deler.
+    sale_jump = None
     try:
         token = os.urandom(8).hex()
         r = remote_step(token)
@@ -698,6 +703,12 @@ def main() -> int:
         real, sand = sales(dest)
 
         prev_state = json.loads(STATE.read_text()) if STATE.exists() else {}
+        # ⚠️ prev YOKSA TETİKLEMEZ: ilk koşuda 0'dan 0'a 'sıçrama' uydurup
+        # sahte müjde göndermesin. Artış BİR KEZ tetikler — state her
+        # koşuda güncelleniyor, ertesi saat prev zaten yeni değer.
+        _pr = prev_state.get('real')
+        if isinstance(_pr, int) and isinstance(real, int) and real > _pr:
+            sale_jump = (_pr, real)
         rc_total, rc_dist = 0, {}
         rc_more: dict = {}
         fb_users, regions = -1, []
@@ -812,10 +823,13 @@ def main() -> int:
     # kapatır ve sorun başına YALNIZ BİR KEZ gider: gönderimden sonra imza
     # boşa yazılır, ertesi saat prev_sig boş olur ve tekrar tetiklenmez.
     resolved = ok and bool(prev_sig)
-    head = ("✅ RYTEX raporu — DÜZELDİ" if resolved else
+    head = ("🎉 RYTEX — GERÇEK SATIŞ" if sale_jump else
+            "✅ RYTEX raporu — DÜZELDİ" if resolved else
             "✅ RYTEX raporu" if ok else "🔴 RYTEX raporu — SORUN")
     # Yerel saat: makine Europe/Istanbul, rapor da o saatle okunuyor.
     body = [head, started.astimezone().strftime("%d.%m.%Y %H:%M"), ""]
+    if sale_jump:
+        body += [f"💳 <b>gerçek satış {sale_jump[0]} → {sale_jump[1]}</b>", ""]
     if problems:
         body += ["<b>Sorunlar</b>"] + [f"• {p}" for p in problems] + [""]
     elif resolved and prev_problems:
@@ -836,7 +850,8 @@ def main() -> int:
     # yeniden bildirilir.
     sig = "|".join(sorted(re.sub(r"\d+", "#", p) for p in problems))
     repeat = bool(problems) and sig == prev_sig
-    mute = args.quiet and not scheduled and not resolved and (ok or repeat)
+    mute = (args.quiet and not scheduled and not resolved
+            and not sale_jump and (ok or repeat))
     # "Mesaj neden gelmedi" sorusunun cevabı log'da yazsın — susturma
     # eklendikten sonra sessizlik iki farklı şey demek oluyor.
     if mute:
