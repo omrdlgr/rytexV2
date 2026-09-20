@@ -113,6 +113,24 @@ SMS_WINDOW_H = 24
 WATCHED = ["users", "partnerships", "entitlements", "public_keys"]
 COUNTED = WATCHED + ["sparks", "shares", "partner_requests", "push_tokens"]
 
+# Rapordaki Türkçe etiketler (kullanıcı isteği 2026-09-20). ⚠️ YALNIZ
+# GÖSTERİMDE kullanılır: sözlüğün ANAHTARI SQL tablo adı olarak KALMAK
+# ZORUNDA, çünkü `counts` aynı anahtarlarla state dosyasına yazılıyor ve
+# `drift()` düne göre karşılaştırmayı o anahtar üzerinden yapıyor. Anahtar
+# Türkçeleştirilseydi bir sonraki koşuda `prev.get("kullanıcı")` None döner,
+# karşılaştırma sessizce atlanır ve veri kaybı alarmı o koşuda ÇALIŞMAZDI —
+# yani rapor okunur olurken nöbetçi kör kalırdı.
+TR_TABLO = {
+    "users": "kullanıcı",
+    "partnerships": "partnerlik",
+    "entitlements": "abonelik hakkı",
+    "public_keys": "açık anahtar",
+    "sparks": "SPARK",
+    "shares": "paylaşım",
+    "partner_requests": "partner isteği",
+    "push_tokens": "push jetonu",
+}
+
 
 # 🔴 `fly` KOMUTLARI BİR KEZ YENİDEN DENENİR (2026-09-17).
 #
@@ -245,9 +263,9 @@ def drift(now: dict, prev: dict | None) -> list[str]:
     for t in WATCHED:
         a, b = prev.get(t), now.get(t)
         if isinstance(a, int) and isinstance(b, int) and b < a:
-            out.append(f"{t}: {a} → {b} (DÜŞTÜ)")
+            out.append(f"{TR_TABLO.get(t, t)}: {a} → {b} (DÜŞTÜ)")
     if now.get("users") is None:
-        out.append("users tablosu okunamadı — şema bozulmuş olabilir")
+        out.append("kullanıcı tablosu okunamadı — şema bozulmuş olabilir")
     return out
 
 
@@ -263,8 +281,11 @@ def rc_flag() -> tuple[int, dict]:
 
     RC `last_seen_country` IP tabanlı; ASC storefront'a bakar. İkisi farklı
     şey ölçer ve TUTMAMASI normaldir (2026-08-19'da doğrulandı)."""
+    # ⚠️ SESSİZ SIFIR YOK: anahtar düşerse "0 müşteri" yazmak, bayrağın
+    # kör kaldığını gizler — üstelik state'e 0 yazılıp ertesi koşuda sahte
+    # sıçrama üretir. Anahtarın kaybolması da bir sorundur, öyle bildirilir.
     if not RC_SECRET:
-        return 0, {}
+        raise RuntimeError("RC_SECRET tanımsız — bayrak okunamaz")
     h = {"Authorization": "Bearer " + RC_SECRET,
          "Content-Type": "application/json"}
     proj = _get_json("https://api.revenuecat.com/v2/projects", h)["items"][0]["id"]
@@ -274,7 +295,19 @@ def rc_flag() -> tuple[int, dict]:
         d = _get_json(url, h)
         items += d["items"]
         nxt = d.get("next_page")
-        url = ("https://api.revenuecat.com" + nxt) if nxt else None
+        # ⚠️ RC `next_page`'i TAM URL olarak döndürüyor (2026-09-20'de
+        # ölçüldü), eskiden yol sanılıp başına host ekleniyordu ve sonuç
+        # "https://api.revenuecat.comhttps://api.revenuecat.com/..." gibi
+        # geçersiz bir adres oluyordu. Hata ancak müşteri sayısı 100'ü
+        # geçince tetikleniyor — o yüzden aylarca görünmedi ve tam
+        # 92→100+ geçişinde Telegram'a "RC okunamadı" düştü.
+        # İki biçimi de kabul ediyoruz: RC yarın yola dönerse de çalışsın.
+        if not nxt:
+            url = None
+        elif nxt.startswith("http"):
+            url = nxt
+        else:
+            url = "https://api.revenuecat.com" + nxt
     dist: dict = {}
     for i in items:
         c = i.get("last_seen_country") or "??"
@@ -604,17 +637,17 @@ def main() -> int:
         if r["CANARY"] != "true":
             problems.append("KANARYA: yazılan değer geri okunamadı")
         if r["QUICK"] != "ok":
-            problems.append(f"QUICK_CHECK: {r['QUICK']}")
+            problems.append(f"hızlı bütünlük kontrolü (quick_check): {r['QUICK']}")
 
         dest = BACKUP_DIR / f"rytex-{day}.db"
         part = fetch(dest)
         size = part.stat().st_size
         if size != int(r["BYTES"]):
-            problems.append(f"BOYUT UYUŞMUYOR: sunucu {r['BYTES']}, yerel {size}")
+            problems.append(f"boyut uyuşmuyor: sunucu {r['BYTES']}, yerel {size}")
 
         integrity, counts = verify(part)
         if integrity != "ok":
-            problems.append(f"INTEGRITY: {integrity[:120]}")
+            problems.append(f"bütünlük denetimi (integrity_check): {integrity[:120]}")
         # Doğrulama bitti — ancak şimdi "bugünün yedeği" adını alır.
         dest.unlink(missing_ok=True)
         part.replace(dest)
@@ -624,9 +657,9 @@ def main() -> int:
 
         age_h = snapshot_age_hours()
         if age_h is None:
-            problems.append("Fly snapshot BULUNAMADI")
+            problems.append("Fly anlık görüntüsü (snapshot) BULUNAMADI")
         elif age_h > SNAPSHOT_MAX_AGE_H:
-            problems.append(f"Fly snapshot bayat: {age_h:.0f} saat")
+            problems.append(f"Fly anlık görüntüsü (snapshot) bayat: {age_h:.0f} saat")
 
         # Gerçek satış YEDEKTEN okunur — ek API yok, veri zaten elimizde.
         real, sand = sales(dest)
@@ -634,14 +667,23 @@ def main() -> int:
         prev_state = json.loads(STATE.read_text()) if STATE.exists() else {}
         rc_total, rc_dist = 0, {}
         fb_users, regions = -1, []
+        rc_ok = fb_ok = False
         try:
             rc_total, rc_dist = rc_flag()
+            rc_ok = True
         except Exception as e:                              # noqa: BLE001
-            problems.append(f"RC okunamadı: {type(e).__name__}")
+            # ⚠️ SEBEP DE YAZILIYOR. 20 Eylül'de bu satır yalnız
+            # "RC okunamadı: URLError" dedi; o metinden teşhis ÇIKMIYORDU,
+            # kök neden (sayfalamada çift host) ancak API elle yeniden
+            # çağrılarak bulundu. Sınıf adı tek başına nöbetçiyi
+            # "bir şey oldu" demekten öteye götürmüyor.
+            problems.append(f"RC okunamadı: {type(e).__name__}: {str(e)[:120]}")
         try:
             fb_users, regions = firebase_stats()
+            fb_ok = True
         except Exception as e:                              # noqa: BLE001
-            problems.append(f"Firebase okunamadı: {type(e).__name__}")
+            problems.append(
+                f"Firebase okunamadı: {type(e).__name__}: {str(e)[:120]}")
 
         sms_sent: dict = {}
         sms_blocked: dict = {}
@@ -651,7 +693,8 @@ def main() -> int:
         except Exception as e:                              # noqa: BLE001
             # Yetki kaybı da bir sorundur: monitoring.viewer 2026-09-11'de
             # elle verildi, sessizce geri alınırsa kör kalırız.
-            problems.append(f"SMS metrikleri okunamadı: {type(e).__name__}")
+            problems.append(
+                f"SMS metrikleri okunamadı: {type(e).__name__}: {str(e)[:120]}")
 
         outside = [c for c in rc_dist if c not in regions and c != "??"] \
             if regions else []
@@ -661,9 +704,17 @@ def main() -> int:
 
         final = encrypt(dest)
         removed = retain()
+        # ⚠️ OKUNAMAYAN SAYI STATE'E YAZILMAZ — *bilinmiyor* ile *sıfır*
+        # aynı şey değil (RC hak uzlaştırmasındaki asimetrinin aynısı).
+        # 20 Eylül'de RC sayfalaması kırılınca state'e `rc: 0` yazıldı ve
+        # düzeldiği koşuda rapor "🚩 RC 101 müşteri (+101)" dedi — okuma
+        # hatası, 101 kişilik sıçrama gibi göründü. Son BİLİNEN değer
+        # korunuyor; delta bir sonraki başarılı koşuda doğru çıkar.
         STATE.write_text(json.dumps(
-            {"at": started.isoformat(), "counts": counts, "rc": rc_total,
-             "fb": fb_users, "real": real}, indent=1))
+            {"at": started.isoformat(), "counts": counts,
+             "rc": rc_total if rc_ok else prev_state.get("rc", rc_total),
+             "fb": fb_users if fb_ok else prev_state.get("fb", fb_users),
+             "real": real}, indent=1))
 
         def delta(key, now_val):
             old_val = prev_state.get(key)
@@ -677,7 +728,7 @@ def main() -> int:
         # yapıyordu. Sıfır satır gizlenmez — "0 oldu" bilgisi de bilgidir.
         for k, v in counts.items():
             if v is not None:
-                lines.append(f"{k}: {v}")
+                lines.append(f"{TR_TABLO.get(k, k)}: {v}")
         lines.append(f"yedek: {final.name} · {size / 1024:.0f} KB"
                      + (" · şifreli" if final.suffix == ".age" else ""))
         lines.append(f"snapshot: {age_h:.0f} sa önce" if age_h is not None
