@@ -26,4 +26,15 @@ set -a
 . ./.env
 set +a
 
+# ⚠️ TEK ÖRNEK KİLİDİ. Saha bulgusu 2026-09-21: elle koşu ile cron
+# AYNI SANİYEDE çalıştı, ikisi de state'i yazılmadan önce okudu ve
+# AYNI mesaj Telegram'a İKİ KEZ düştü. Susturma mantığı doğruydu,
+# eksik olan kilitti. Asıl tehlike elle koşu değil: bir tur takılırsa
+# bir sonraki saat üstüne biner ve yedek/state bozulabilir.
+exec 9>/tmp/rytex-storewatch.lock
+if ! flock -n 9; then
+  echo "$(date +%F\ %T) [atlandı: önceki mağaza turu hâlâ çalışıyor]" >> "$LOG"
+  exit 0
+fi
+
 exec /usr/bin/python3 rytex_storewatch.py >> "$LOG" 2>&1
