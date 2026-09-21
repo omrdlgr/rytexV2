@@ -1,31 +1,22 @@
 #!/usr/bin/env python3
-"""MAĞAZA NÖBETÇİSİ — yeni yorum ve yıldız geldiğinde Telegram'a haber verir.
+"""MAĞAZA NÖBETÇİSİ — yeni yorum gelince Telegram'a haber verir.
 
     python3 rytex_storewatch.py [--dry] [--selftest]
 
-DB nöbetçisinden (`rytex_dbwatch.py`) AYRI bir betik, bilinçli: o betik yedek
-alıyor, Fly'a bağlanıyor ve dakikalarca sürebiliyor; mağaza yoklaması ise
-saniyeler sürüyor ve onun hatasından etkilenmemeli. Ortak olan yalnız `.env`
-(aynı Telegram botu) ve yedek dizini (state dosyası).
+TEK İŞİ VAR: yorum kaçırmamak (kullanıcı kararı 2026-09-21 — "gerçek ihtiyaç
+yorumları kaçırmamak"). Yıldız takibi BİLEREK ÇIKARILDI: yıldız-only puandan
+düzeltilecek bilgi çıkmıyor (sayının oynadığını görürsün, sebebini göremezsin)
+ve Apple puanı global vermediği için storefront başına taranması gerekiyordu —
+taşıdığı bilgiye göre pahalı bir karmaşıklıktı. Kullanıcı yıldızları kendisi
+izliyor.
 
-────────────────────────────────────────────────────────────────────────────
-🔴 EN ÖNEMLİ BULGU (2026-09-21'de ölçüldü): YILDIZ ve YORUM AYRI KAYNAKTA.
+DB nöbetçisinden (rytex_dbwatch.py) AYRI betik, bilinçli: o betik yedek alıp
+Fly'a bağlanıyor ve dakikalarca sürebiliyor; bu tur saniyeler sürüyor ve onun
+hatasından etkilenmemeli. Ortak olan yalnız .env ve state dizini.
 
-ASC'nin `customerReviews` ucu **yıldız-only puanları HİÇ döndürmüyor**.
-8 Eylül'de RYTEX'e 5 yıldız gelmişti ve o uç `total: 0` diyordu — yalnız ona
-bakan bir nöbetçi "puan yok" der ve o puanı asla görmezdi. Yıldızlar açık
-`itunes.apple.com/lookup` ucundan geliyor ve orada gerçekten görünüyor
-(RYTEX `tr`: ort 5.0, n=1).
-
-⚠️ VE YILDIZLAR STOREFRONT BAZINDA: aynı anda `us` 0, `tr` 5.0 diyor. Tek
-ülkeye bakan nöbetçi kördür. Bu yüzden ülke listesi üzerinden dönülüyor.
-────────────────────────────────────────────────────────────────────────────
-
-NE ZAMAN MESAJ GİDER:
-  • yeni yorum (App Store metinli / Play) → ANINDA
-  • yıldız sayısı ya da ortalaması değişti  → ANINDA
-  • günde bir kez → yıldız raporu (değişiklik olmasa da)
-Hiçbiri yoksa SESSİZ. Gürültü, gerçek haberi öldürür.
+⚠️ SESSİZLİK İKİ ANLAMA GELMESİN: bu betik yorum yokken hiç mesaj atmıyor,
+öldüğünde de sessiz olurdu. Her koşuda `last_run` damgası yazılıyor; DB
+nöbetçisi onu okuyup bayatladıysa SORUN olarak bildiriyor.
 """
 from __future__ import annotations
 
@@ -35,7 +26,6 @@ import json
 import os
 import re
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -47,14 +37,16 @@ STATE = BACKUP_DIR / "storewatch-state.json"
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 
-# Günlük yıldız raporunun saati (yerel). DB nöbetçisiyle aynı saate denk
-# gelmesin diye 11; ikisi aynı dakikada iki mesaj atarsa biri gözden kaçıyor.
-DAILY_HOUR = int(os.environ.get("STOREWATCH_DAILY_HOUR", "11"))
+# Kapsama denetiminin saati (yerel). Günde bir kez koşar.
+AUDIT_HOUR = int(os.environ.get("STOREWATCH_AUDIT_HOUR", "11"))
 
-# ⚠️ DAR YETKİLİ ANAHTARLAR (bkz. dosya başındaki güvenlik notu).
-# ASC: "Customer Support" rolü yorumları okumaya YETER ve sürüm yayınlayamaz.
-# Play: yalnız "Reply to reviews" izinli ayrı servis hesabı.
-# Tanımlı değilse SESSİZCE ATLANMAZ — sorun olarak bildirilir.
+# ⚠️ DAR YETKİLİ ANAHTARLAR. Elimizdeki geniş anahtarlar bilerek
+# KULLANILMIYOR: ASC anahtarımız sürüm yayınlayabiliyor, play-publisher.json
+# AAB yükleyebiliyor — ikisini de bu makineye koymak, RevenueCat için dar
+# hesap açma kararının (2026-09-20) tersi olurdu.
+#   ASC : rol "Customer Support" — yorum okur/cevaplar, sürüm YAYINLAYAMAZ
+#   Play: yalnız "Reply to reviews" izinli servis hesabı
+# Tanımlı değilse SESSİZCE ATLANMAZ, görünür sorun olarak bildirilir.
 ASC_KEY_ID = os.environ.get("ASC_REVIEW_KEY_ID", "")
 ASC_ISSUER = os.environ.get("ASC_REVIEW_ISSUER", "")
 ASC_KEY_FILE = os.environ.get("ASC_REVIEW_KEY_FILE", "")
@@ -62,30 +54,21 @@ PLAY_SA = os.environ.get("PLAY_REVIEW_SA", "")
 
 ASC_B = "https://api.appstoreconnect.apple.com/v1"
 
-# İzlenen uygulamalar. ISS'in Play sürümü YOK (Play hesabında tek paket adı
-# kayıtlı: com.rytex.app) — `play` alanı None ise o tarafa hiç bakılmaz.
+# ISS'in Play sürümü YOK (Play hesabında kayıtlı tek paket: com.rytex.app).
 APPS = [
-    {"key": "rytex", "ad": "RYTEX", "ikon": "📱",
-     "asc_id": "6788542298", "play": "com.rytex.app"},
-    {"key": "iss", "ad": "Space Station Alarm", "ikon": "🛰",
-     "asc_id": "6793333020", "play": None},
+    {"ad": "RYTEX", "ikon": "📱", "asc_id": "6788542298", "play": "com.rytex.app"},
+    {"ad": "Space Station Alarm", "ikon": "🛰", "asc_id": "6793333020", "play": None},
 ]
 
-# SAAT BAŞI bakılan ülkeler: RC'de kullanıcımız olanlar + 14 dilimizin
-# pazarları. 175 storefront'u saat başı yoklamak anlamsız; puan buralardan
-# gelmezse günlük geniş tarama yakalar.
-CORE = ["us", "tr", "gb", "de", "fr", "es", "it", "nl", "se", "no",
-        "pl", "ru", "ua", "br", "mx", "jp", "cn", "ca", "au"]
+# Kapsama denetiminde tek tek sorulan ülkeler.
+# ⚠️ ÜÇ HARFLİ (alpha-3) OLMAK ZORUNDA: ASC iki harfliyi reddediyor —
+# `filter[territory]=US` → HTTP 400 "'US' is not a valid filter value",
+# `=USA` → 200 (2026-09-21'de ölçüldü). İlk yazımda alpha-2 kullanmıştım ve
+# denetim HTTPError veriyordu; hatayı denetimin kendisi açığa çıkardı.
+AUDIT_TERRITORIES = ["USA", "TUR", "GBR", "DEU", "FRA", "ESP", "ITA", "NLD",
+                     "SWE", "NOR", "POL", "RUS", "UKR", "BRA", "MEX", "JPN",
+                     "CAN", "AUS"]
 
-# GÜNDE BİR KEZ bakılan geniş liste (çekirdeğe ek).
-WIDE = CORE + [
-    "ch", "at", "be", "dk", "fi", "ie", "nz", "pt", "gr", "cz", "hu", "ro",
-    "il", "za", "kr", "tw", "hk", "sg", "ar", "cl", "co", "pe", "uy",
-    "in", "id", "ph", "th", "vn", "my", "sa", "ae", "eg", "ng", "ke",
-]
-
-# State'te tutulacak en fazla yorum kimliği. Sınırsız büyürse dosya şişer;
-# 500 yorum bizim hacmimizde yıllara denk gelir.
 SEEN_CAP = 500
 
 
@@ -112,58 +95,38 @@ def _get_json(url: str, headers: dict | None = None, timeout: int = 25) -> dict:
         return json.load(r)
 
 
-# ── Yıldızlar: açık iTunes ucu, kimlik bilgisi GEREKMİYOR ───────────────────
-def stars(asc_id: str, ulkeler: list[str]) -> tuple[dict, list[str]]:
-    """Storefront başına (adet, ortalama). Tek ülkenin hatası TURU DÜŞÜRMEZ.
-
-    ⚠️ Bu uç CDN önbellekli: sürüm dizisinde saatlerce gecikme ÖLÇÜLMÜŞTÜ
-    (12 Eylül, yayın sonrası iTunes hâlâ eski sürümü gösteriyordu). Yani
-    "anında" değil, "birkaç saat içinde" bekle.
-    """
-    out: dict[str, dict] = {}
-    hata: list[str] = []
-    for cc in ulkeler:
-        try:
-            d = _get_json(f"https://itunes.apple.com/lookup?id={asc_id}&country={cc}")
-            res = d.get("results") or []
-            if not res:
-                continue                      # o ülkede satışta değil
-            r = res[0]
-            n = int(r.get("userRatingCount") or 0)
-            if n:                             # 0 puanlı ülkeyi state'e yazma
-                out[cc] = {"n": n, "avg": round(float(r.get("averageUserRating") or 0), 2)}
-        except Exception as e:                # noqa: BLE001
-            hata.append(f"{cc}:{type(e).__name__}")
-        time.sleep(0.25)                      # ucu dövmeyelim
-    return out, hata
-
-
-# ── App Store yorumları: ASC API ────────────────────────────────────────────
-def asc_reviews(asc_id: str) -> list[dict]:
+def _asc_token() -> str:
     if not (ASC_KEY_ID and ASC_ISSUER and ASC_KEY_FILE):
         raise RuntimeError("ASC yorum anahtarı tanımsız")
     import jwt                                # noqa: PLC0415
     key = Path(ASC_KEY_FILE).expanduser().read_text()
-    tok = jwt.encode({"iss": ASC_ISSUER, "iat": int(time.time()),
-                      "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"},
-                     key, algorithm="ES256", headers={"kid": ASC_KEY_ID})
-    d = _get_json(
-        f"{ASC_B}/apps/{asc_id}/customerReviews?limit=50&sort=-createdDate",
-        {"Authorization": "Bearer " + tok})
+    return jwt.encode({"iss": ASC_ISSUER, "iat": int(time.time()),
+                       "exp": int(time.time()) + 900, "aud": "appstoreconnect-v1"},
+                      key, algorithm="ES256", headers={"kid": ASC_KEY_ID})
+
+
+def asc_reviews(asc_id: str, territory: str = "") -> list[dict]:
+    """App Store yorumları. `territory` verilirse yalnız o ülke."""
+    url = f"{ASC_B}/apps/{asc_id}/customerReviews?limit=50&sort=-createdDate"
+    if territory:
+        url += f"&filter[territory]={territory}"
+    d = _get_json(url, {"Authorization": "Bearer " + _asc_token()})
     out = []
     for x in d.get("data", []):
         a = x["attributes"]
         out.append({
-            "id": x["id"], "magaza": "App Store",
-            "yildiz": a.get("rating"), "ulke": (a.get("territory") or "").lower(),
+            "id": x["id"], "magaza": "App Store", "yildiz": a.get("rating"),
+            "ulke": (a.get("territory") or "").lower(),
             "baslik": a.get("title") or "", "metin": a.get("body") or "",
-            "kisi": a.get("reviewerNickname") or "", "tarih": (a.get("createdDate") or "")[:10],
-        })
+            "kisi": a.get("reviewerNickname") or "",
+            "tarih": (a.get("createdDate") or "")[:10]})
     return out
 
 
-# ── Play yorumları ──────────────────────────────────────────────────────────
 def play_reviews(pkg: str) -> list[dict]:
+    """Play yorumları. ⚠️ Play yalnız YAKIN DÖNEM yorumlarını döndürüyor;
+    saatlik yoklamada sorun değil ama makine günlerce kapalı kalırsa arada
+    gelen yorum bir daha görünmeyebilir."""
     if not PLAY_SA:
         raise RuntimeError("Play yorum servis hesabı tanımsız")
     import jwt                                # noqa: PLC0415
@@ -193,15 +156,14 @@ def play_reviews(pkg: str) -> list[dict]:
             "ulke": (c.get("reviewerLanguage") or "").lower(),
             "baslik": "", "metin": c.get("text") or "",
             "kisi": r.get("authorName") or "",
-            "tarih": datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else "",
-        })
+            "tarih": datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d") if ts else ""})
     return out
 
 
 def yorum_blogu(r: dict) -> list[str]:
-    """Tek yorumun Telegram gövdesi. Metin KIRPILIYOR (Telegram 4096 sınırı)."""
-    yildiz = "★" * int(r["yildiz"] or 0) + "☆" * (5 - int(r["yildiz"] or 0))
-    bas = f"  {yildiz} <b>{r['yildiz']}</b> · {r['magaza']}"
+    """Tek yorumun gövdesi. Metin kırpılıyor — Telegram sınırı 4096."""
+    n = int(r["yildiz"] or 0)
+    bas = f"  {'★' * n}{'☆' * (5 - n)} <b>{n}</b> · {r['magaza']}"
     if r["ulke"]:
         bas += f" · {r['ulke'].upper()}"
     if r["tarih"]:
@@ -217,32 +179,11 @@ def yorum_blogu(r: dict) -> list[str]:
     return satir
 
 
-def yildiz_farki(eski: dict, yeni: dict) -> list[str]:
-    """Değişen storefront'lar. ⚠️ ESKİ YOKSA FARK ÜRETİLMEZ: ilk koşuda
-    mevcut tüm puanlar "yeni geldi" diye bildirilirse sahte alarm olur."""
-    if not eski:
-        return []
-    out = []
-    for cc in sorted(set(eski) | set(yeni)):
-        a, b = eski.get(cc), yeni.get(cc)
-        if a == b:
-            continue
-        if a is None:
-            out.append(f"  🆕 {cc.upper()}: ilk puan — {b['avg']} ({b['n']} oy)")
-        elif b is None:
-            out.append(f"  ⚠️ {cc.upper()}: puan kayboldu ({a['n']} oy idi)")
-        else:
-            ok = "↑" if b["avg"] > a["avg"] else ("↓" if b["avg"] < a["avg"] else "→")
-            out.append(f"  {cc.upper()}: {a['avg']} → {b['avg']} {ok} "
-                       f"· oy {a['n']} → {b['n']}")
-    return out
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dry", action="store_true", help="Telegram'a gönderme")
+    ap.add_argument("--dry", action="store_true")
     ap.add_argument("--selftest", action="store_true",
-                    help="sahte yorum + sahte yıldız değişimi enjekte et (dişi testi)")
+                    help="sahte yorum enjekte et (dişi testi)")
     args = ap.parse_args()
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -251,30 +192,22 @@ def main() -> int:
         try:
             st = json.loads(STATE.read_text())
         except Exception:                     # noqa: BLE001
-            st = {}                           # bozuk state = sıfırdan, ama sessiz değil
             log("UYARI: state okunamadı, sıfırlandı")
 
     simdi = datetime.now()
-    gunluk = (simdi.hour == DAILY_HOUR and st.get("last_daily") != simdi.strftime("%Y-%m-%d"))
-    ulkeler = WIDE if gunluk else CORE
-
+    denetim = (simdi.hour == AUDIT_HOUR
+               and st.get("last_audit") != simdi.strftime("%Y-%m-%d"))
     gorulen = set(st.get("seen_reviews", []))
-    eski_yildiz = st.get("stars", {})
-    yeni_yildiz: dict[str, dict] = {}
     sorunlar: list[str] = []
     govde: list[str] = []
-    yeni_yorum_sayisi = 0
-    yildiz_degisti = False
+    toplam_yeni = 0
 
     for app in APPS:
-        bolum: list[str] = []
-
-        # 1) yorumlar
-        yeni_yorumlar = []
+        yeni: list[dict] = []
         try:
             for r in asc_reviews(app["asc_id"]):
                 if r["id"] and f"as:{r['id']}" not in gorulen:
-                    yeni_yorumlar.append(r)
+                    yeni.append(r)
         except Exception as e:                # noqa: BLE001
             sorunlar.append(f"{app['ad']}: App Store yorumları okunamadı — "
                             f"{type(e).__name__}: {str(e)[:100]}")
@@ -282,68 +215,56 @@ def main() -> int:
             try:
                 for r in play_reviews(app["play"]):
                     if r["id"] and f"play:{r['id']}" not in gorulen:
-                        yeni_yorumlar.append(r)
+                        yeni.append(r)
             except Exception as e:            # noqa: BLE001
                 sorunlar.append(f"{app['ad']}: Play yorumları okunamadı — "
                                 f"{type(e).__name__}: {str(e)[:100]}")
 
-        if args.selftest and app["key"] == "rytex":
-            yeni_yorumlar.append({
-                "id": "SELFTEST", "magaza": "App Store", "yildiz": 2,
-                "ulke": "de", "baslik": "Dişi testi",
-                "metin": "Bu sahte bir yorumdur; mesaj yolunun çalıştığını kanıtlar.",
-                "kisi": "selftest", "tarih": simdi.strftime("%Y-%m-%d")})
+        # 🔴 KAPSAMA DENETİMİ — GÜNDE BİR KEZ.
+        # Filtresiz `customerReviews` çağrısının TÜM ülkeleri döndürdüğü bir
+        # VARSAYIM; sıfır yorum olduğu için kanıtlanamadı. Varsayım yanlışsa
+        # nöbetçi sessizce yorum kaçırır — yani tek işini yapmaz. Bu yüzden
+        # günde bir kez ülke ülke de çekip filtresiz sonuçla karşılaştırıyoruz.
+        if denetim and not args.selftest:
+            try:
+                genis = {r["id"] for r in asc_reviews(app["asc_id"])}
+                kacan = []
+                for cc in AUDIT_TERRITORIES:
+                    for r in asc_reviews(app["asc_id"], cc):
+                        if r["id"] not in genis:
+                            kacan.append(f"{cc}:{r['id'][:8]}")
+                    time.sleep(0.15)
+                if kacan:
+                    sorunlar.append(
+                        f"{app['ad']}: filtresiz yorum çağrısı {len(kacan)} yorumu "
+                        f"KAÇIRIYOR ({', '.join(kacan[:3])}) — ülke ülke çekilmeli")
+            except Exception as e:            # noqa: BLE001
+                sorunlar.append(f"{app['ad']}: kapsama denetimi koşamadı — "
+                                f"{type(e).__name__}")
 
-        for r in yeni_yorumlar:
-            bolum += yorum_blogu(r) + [""]
-            if r["id"] != "SELFTEST":
-                gorulen.add(("play:" if r["magaza"] == "Play" else "as:") + r["id"])
-        yeni_yorum_sayisi += len(yeni_yorumlar)
+        if args.selftest and app["ad"] == "RYTEX":
+            yeni.append({"id": "SELFTEST", "magaza": "App Store", "yildiz": 2,
+                         "ulke": "de", "baslik": "Dişi testi",
+                         "metin": "Sahte yorum; mesaj yolunun çalıştığını kanıtlar.",
+                         "kisi": "selftest", "tarih": simdi.strftime("%Y-%m-%d")})
 
-        # 2) yıldızlar
-        sn, hata = stars(app["asc_id"], ulkeler)
-        if hata and len(hata) > len(ulkeler) // 2:
-            sorunlar.append(f"{app['ad']}: yıldız okuması çoğunlukla başarısız "
-                            f"({len(hata)}/{len(ulkeler)})")
-        yeni_yildiz[app["asc_id"]] = sn
-        onceki = eski_yildiz.get(app["asc_id"], {})
-        if args.selftest:
-            onceki = {k: {"n": max(0, v["n"] - 1), "avg": 5.0} for k, v in sn.items()} or \
-                     {"xx": {"n": 1, "avg": 3.0}}
-        fark = yildiz_farki(onceki, sn)
-        if fark:
-            yildiz_degisti = True
-            bolum += ["  <b>yıldız değişimi</b>"] + fark + [""]
+        if yeni:
+            govde.append(f"{app['ikon']} <b>{app['ad']}</b>")
+            for r in yeni:
+                govde += yorum_blogu(r) + [""]
+                if r["id"] != "SELFTEST":
+                    gorulen.add(("play:" if r["magaza"] == "Play" else "as:") + r["id"])
+            toplam_yeni += len(yeni)
 
-        if gunluk:
-            toplam = sum(v["n"] for v in sn.values())
-            if toplam:
-                ort = sum(v["avg"] * v["n"] for v in sn.values()) / toplam
-                bolum.append(f"  <b>puan:</b> {ort:.2f} ortalama · {toplam} oy")
-                for cc, v in sorted(sn.items(), key=lambda x: -x[1]["n"]):
-                    bolum.append(f"    {cc.upper()}: {v['avg']} ({v['n']})")
-            else:
-                bolum.append("  <b>puan:</b> henüz yok")
-            bolum.append("")
-
-        if bolum:
-            govde += [f"{app['ikon']} <b>{app['ad']}</b>"] + bolum
-
-    # ⚠️ AYNI SORUN SAAT BAŞI TEKRARLANMAZ. Bu betik anahtarsız kurulabiliyor
-    # (yıldızlar kimlik istemiyor, yorumlar istiyor) ve o durumda her koşu
-    # "anahtar tanımsız" derdi — günde 24 mesaj, gerçek haberi öldürür.
-    # İmza sorunun TÜRÜNDEN çıkar, metninden değil: rakamlar maskeleniyor,
-    # yoksa "12/19 başarısız" bir sonraki saat "13/19" olup yeni sorun sanılır.
-    # (DB nöbetçisindeki 2026-09-06 dersinin aynısı.)
+    # ⚠️ AYNI SORUN SAAT BAŞI TEKRARLANMAZ. Anahtarlar tanımsızken her koşu
+    # aynı şeyi söylerdi = günde 24 mesaj, gerçek haberi öldürür. İmza sorunun
+    # TÜRÜNDEN çıkar, metninden değil (rakamlar maskeli).
     sig = "|".join(sorted(re.sub(r"\d+", "#", x) for x in sorunlar))
     tekrar = bool(sorunlar) and sig == st.get("problem_sig", "")
-    gonder = bool(yeni_yorum_sayisi or yildiz_degisti or gunluk
-                  or (sorunlar and not tekrar))
-    if gonder:
-        bas = ("💬 YENİ YORUM" if yeni_yorum_sayisi else
-               "⭐ YILDIZ DEĞİŞTİ" if yildiz_degisti else
-               "🔴 MAĞAZA NÖBETÇİSİ — SORUN" if sorunlar and not gunluk else
-               "⭐ Mağaza raporu")
+
+    if toplam_yeni or (sorunlar and not tekrar):
+        bas = (f"💬 YENİ YORUM ({toplam_yeni})" if toplam_yeni
+               else "🔴 MAĞAZA NÖBETÇİSİ — SORUN")
         mesaj = [bas, simdi.strftime("%d.%m.%Y %H:%M"), ""]
         if sorunlar:
             mesaj += ["<b>Sorunlar</b>"] + [f"• {s}" for s in sorunlar] + [""]
@@ -352,17 +273,19 @@ def main() -> int:
         telegram(metin, args.dry)
         print(metin)
     else:
-        log("değişiklik yok, sessiz")
+        log("yeni yorum yok, sessiz")
 
-    # State — selftest gerçek durumu BOZMAZ.
     if not args.selftest:
-        # İmza her koşuda yazılır (sorun yoksa boşalır) — böylece sorun
-        # kapanınca bir sonraki oluşumunda yeniden bildirilir.
+        # Yıldız takibi kaldırıldı — eski state'te kalan alan ölü veri, temizle.
+        st.pop("stars", None)
+        st.pop("last_daily", None)
         st["problem_sig"] = sig
         st["seen_reviews"] = sorted(gorulen)[-SEEN_CAP:]
-        st["stars"] = yeni_yildiz
-        if gunluk:
-            st["last_daily"] = simdi.strftime("%Y-%m-%d")
+        # Kalp atışı: bu betik yorum yokken hiç mesaj atmıyor, ölünce de
+        # sessiz olurdu. DB nöbetçisi bu damgayı okuyup bayatlarsa bildirir.
+        st["last_run"] = simdi.isoformat(timespec="seconds")
+        if denetim:
+            st["last_audit"] = simdi.strftime("%Y-%m-%d")
         STATE.write_text(json.dumps(st, indent=1))
     return 1 if sorunlar else 0
 

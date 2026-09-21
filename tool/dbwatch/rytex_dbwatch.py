@@ -701,6 +701,24 @@ def main() -> int:
         prev = json.loads(STATE.read_text())["counts"] if STATE.exists() else None
         problems += drift(counts, prev)
 
+        # 🔴 MAĞAZA NÖBETÇİSİNİN KALP ATIŞI. O betik yorum yokken HİÇ mesaj
+        # atmıyor (kullanıcı kararı: yıldız takibi çıkarıldı, yalnız yorum
+        # kaldı) — yani öldüğünde de sessiz olurdu ve bunu fark etmezdik.
+        # Sessizliğin iki anlama gelmesi, susturma eklerken de yaşadığımız
+        # tuzağın aynısı; orada "DÜZELDİ" mesajıyla kapatmıştık, burada
+        # damgayla kapatıyoruz.
+        try:
+            sw = json.loads((BACKUP_DIR / "storewatch-state.json").read_text())
+            son = datetime.fromisoformat(sw["last_run"])
+            yas = (datetime.now() - son).total_seconds() / 3600
+            if yas > 3:
+                problems.append(f"mağaza nöbetçisi {yas:.0f} saattir koşmadı "
+                                f"(son: {son:%d.%m %H:%M}) — yorumlar kaçıyor olabilir")
+        except FileNotFoundError:
+            problems.append("mağaza nöbetçisi hiç koşmamış (state dosyası yok)")
+        except Exception as e:                              # noqa: BLE001
+            problems.append(f"mağaza nöbetçisi damgası okunamadı: {type(e).__name__}")
+
         age_h = snapshot_age_hours()
         if age_h is None:
             problems.append("Fly anlık görüntüsü (snapshot) BULUNAMADI")
