@@ -571,10 +571,15 @@ def encrypt(path: Path) -> Path:
 # ⚠️ Takvim uygulamasına güvenilmedi: bu tarihlerin ikisi de "unutulursa
 # başvuru/koruma düşer" cinsinden ve ikisi de aylar sonra.
 DEADLINES = [
-    ("2026-09-27", "Marka itiraz penceresi kapanıyor",
-     "EPATS → İşlemlerim: itiraz gelmiş mi, tescil kararı çıkmış mı. "
-     "Karar sonrası 7.010 TL tescil ücreti SÜRESİNDE ödenmezse başvuru "
-     "geri çekilmiş sayılır (başvuru 2026/087181)."),
+    # ⚠️ 2026-09-22'de ANLAMI DEĞİŞTİ: bu satır "tescil ücreti son tarihi"
+    # diyordu, artık YANLIŞ. 16.09.2026'da yayıma İTİRAZ GELDİ (Retek Selüloz
+    # A.Ş., evrak 2026-GE-659331) → tescil aşaması askıda, 7.010 TL bu tarihte
+    # doğmuyor; ücret ancak itiraz karara bağlandıktan sonra gündeme gelir.
+    # Nöbetçi düzeltilmeseydi yanlış işi hatırlatmaya devam edecekti.
+    ("2026-09-27", "Marka: yayıma itiraz penceresi kapanıyor",
+     "2026/087181'e 16.09'da itiraz geldi. Bu tarihe kadar İKİNCİ bir itiraz "
+     "daha gelebilir → EPATS evrak listesini kontrol et. Tescil ücreti bu "
+     "tarihte DOĞMAZ (süreç askıda)."),
     ("2027-01-07", "Madrid/EUIPO rüçhan penceresi",
      "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
      "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
@@ -591,6 +596,37 @@ DEADLINES = [
      "20.09.2026 teyidi). Beklenen davranış: kendiliğinden yenilenir. "
      "Satır yalnız hatırlatma; yenilenmezse uygulamalar App Store'dan düşer."),
 ]
+
+# ── ETEBS HATIRLATICISI ──────────────────────────────────────────────────
+# 🔴 NEDEN VAR: 2026/087181 sayılı marka başvurumuza yayıma itiraz edildi
+# (16.09.2026). Kurum itirazı tebliğ edince KARŞI GÖRÜŞ İÇİN 1 AY süre başlar
+# ve o süre kaçarsa kullanım ispatı talebi dahil savunma hakkı YANAR
+# (Kullanım İspatı Kılavuzu böl. 2: talep bu aşamada yapılmazsa YİDDB
+# aşamasında ileri sürülemez).
+#
+# ⚠️ TEBLİGAT YALNIZ ELEKTRONİK: başvuru formunun dipnotu — "tebligatlar SMK
+# 160 uyarınca elektronik ortamda yapılacak olup, ayrıca fiziki tebligat
+# yapılmayacaktır". Bu itirazda mail/SMS HİÇ gelmedi; kullanıcı siteye kendi
+# bakarak öğrendi. Elektronik tebligat açılmasa da süre işlemeye başlar,
+# yani ETEBS'e bakmamak süreyi DURDURMAZ.
+#
+# ⚠️ BU SATIR OTOMATİK KONTROL DEĞİL, HATIRLATMA: ETEBS e-Devlet girişi
+# istiyor, nöbetçi oraya bakamaz. İnsan gözünün yerine geçmez, unutmayı
+# engeller. Tebliğ gelince ETEBS_WATCH = False yapılacak ve yerine gerçek
+# son tarih DEADLINES'a yazılacak.
+#
+# ⚠️ "problems" DEĞİL "lines": sorun listesine koysaydım her saat başı anında
+# mesaj üretir, susturma mantığı rakam maskelediği için de hiç susmazdı —
+# günde 24 bildirim, üç gün sonra kimse okumaz. Planlı raporda (10:00/21:00)
+# günde iki kez görünmesi yeterli.
+ETEBS_WATCH = True
+ETEBS_NOTE = (
+    "🔔 ETEBS'i kontrol et — marka itirazının tebliği bekleniyor "
+    "(2026/087181). Tebliğ düşerse KARŞI GÖRÜŞ İÇİN 1 AY başlar; "
+    "kaçarsa kullanım ispatı talebi dahil savunma hakkı yanar. "
+    "epats.turkpatent.gov.tr → Şahsıma Yapılan Tebligatlar. "
+    "22.09.2026 durumu: tek tebligat var, o da 28.07 yayım bildirimi."
+)
 
 # Raporda görünmeye başladığı eşik, "sorun" sayıldığı eşik ve geçtikten
 # sonra kaç gün alarm vereceği.
@@ -841,6 +877,8 @@ def main() -> int:
     dl_lines, dl_problems = deadlines(started.astimezone().date())
     lines += dl_lines
     problems += dl_problems
+    if ETEBS_WATCH:
+        lines.append(ETEBS_NOTE)
 
     ok = not problems
     # KAPANIŞ HABERİ: sorun bir önceki koşuda vardı, şimdi yok. Susturma
