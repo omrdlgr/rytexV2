@@ -56,7 +56,14 @@ ASC_B = "https://api.appstoreconnect.apple.com/v1"
 
 # ISS'in Play sürümü YOK (Play hesabında kayıtlı tek paket: com.rytex.app).
 APPS = [
-    {"ad": "RYTEX", "ikon": "📱", "asc_id": "6788542298", "play": "com.rytex.app"},
+    # ⚠️ RYTEX'İN PLAY HEDEFİ BİLEREK KAPALI (2026-09-28). Play yorum yarısı
+    # 21.09'da ertelendi: Play API "yalnız yorum okuma" diye bir yetki
+    # tanımlayamıyor, o yüzden servis hesabı hiç verilmedi. Hedef açık kaldığı
+    # için ertelenmiş özellik 21.09'dan beri HER SAAT hata üretiyordu; susturma
+    # onu gizliyordu, ama başka bir sorun (28.09 14:30 App Store 500) gelip
+    # gittikçe imza değişip sahte alarmı yeniden patlatıyordu.
+    # AÇMA KOŞULU: Play üretime çıksın + dar yetkili yorum hesabı çözülsün.
+    {"ad": "RYTEX", "ikon": "📱", "asc_id": "6788542298", "play": None},
     {"ad": "Space Station Alarm", "ikon": "🛰", "asc_id": "6793333020", "play": None},
 ]
 
@@ -272,8 +279,13 @@ def main() -> int:
         metin = "\n".join(mesaj)[:4000]
         telegram(metin, args.dry)
         print(metin)
+    elif sorunlar:
+        # ⚠️ "sessiz" ile "susturuldu" AYRI YAZILIR (2026-09-28). Eskiden ikisi
+        # de "yeni yorum yok, sessiz" diyordu; log okuyan, sorunun sürdüğünü
+        # göremiyor ve nöbetçiyi temiz sanıyordu (27.09'da tam böyle okundu).
+        log(f"yeni yorum yok · SUSTURULDU, sorun sürüyor ({len(sorunlar)})")
     else:
-        log("yeni yorum yok, sessiz")
+        log("yeni yorum yok, temiz")
 
     if not args.selftest:
         # Yıldız takibi kaldırıldı — eski state'te kalan alan ölü veri, temizle.

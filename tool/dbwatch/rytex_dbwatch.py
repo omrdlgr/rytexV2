@@ -571,15 +571,10 @@ def encrypt(path: Path) -> Path:
 # ⚠️ Takvim uygulamasına güvenilmedi: bu tarihlerin ikisi de "unutulursa
 # başvuru/koruma düşer" cinsinden ve ikisi de aylar sonra.
 DEADLINES = [
-    # ⚠️ 2026-09-22'de ANLAMI DEĞİŞTİ: bu satır "tescil ücreti son tarihi"
-    # diyordu, artık YANLIŞ. 16.09.2026'da yayıma İTİRAZ GELDİ (Retek Selüloz
-    # A.Ş., evrak 2026-GE-659331) → tescil aşaması askıda, 7.010 TL bu tarihte
-    # doğmuyor; ücret ancak itiraz karara bağlandıktan sonra gündeme gelir.
-    # Nöbetçi düzeltilmeseydi yanlış işi hatırlatmaya devam edecekti.
-    ("2026-09-27", "Marka: yayıma itiraz penceresi kapanıyor",
-     "2026/087181'e 16.09'da itiraz geldi. Bu tarihe kadar İKİNCİ bir itiraz "
-     "daha gelebilir → EPATS evrak listesini kontrol et. Tescil ücreti bu "
-     "tarihte DOĞMAZ (süreç askıda)."),
+    # ℹ️ 27.09 marka itiraz penceresi satırı KALDIRILDI (2026-09-28): pencere
+    # doldu (27.09 Pazar → fiilen 28.09), EPATS'ta ikinci itiraz yok. Satır
+    # kalsaydı 14 gün boyunca her raporu 🔴 SORUN yapacaktı — gerçek bir
+    # arıza o kırmızının içinde kaybolurdu. Takip ETEBS_NOTE'ta sürüyor.
     ("2027-01-07", "Madrid/EUIPO rüçhan penceresi",
      "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
      "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
@@ -625,7 +620,9 @@ ETEBS_NOTE = (
     "(2026/087181). Tebliğ düşerse KARŞI GÖRÜŞ İÇİN 1 AY başlar; "
     "kaçarsa kullanım ispatı talebi dahil savunma hakkı yanar. "
     "epats.turkpatent.gov.tr → Şahsıma Yapılan Tebligatlar. "
-    "22.09.2026 durumu: tek tebligat var, o da 28.07 yayım bildirimi."
+    "28.09.2026 durumu: tek tebligat var (28.07 yayım bildirimi), EPATS'ta "
+    "tek itiraz. 30.09'da evrak listesine son kez bak — son gün yapılan "
+    "itiraz listeye geç düşebilir."
 )
 
 # Raporda görünmeye başladığı eşik, "sorun" sayıldığı eşik ve geçtikten
