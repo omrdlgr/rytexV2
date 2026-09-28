@@ -575,6 +575,14 @@ DEADLINES = [
     # doldu (27.09 Pazar → fiilen 28.09), EPATS'ta ikinci itiraz yok. Satır
     # kalsaydı 14 gün boyunca her raporu 🔴 SORUN yapacaktı — gerçek bir
     # arıza o kırmızının içinde kaybolurdu. Takip ETEBS_NOTE'ta sürüyor.
+    # 💰 APPLE ADS PARA KORUMASI (2026-09-29). Basic bütçesi takvim ayıyla
+    # sıfırlanıyor ve Apple "kredi bitince durur" demiyor (yardım sayfası sessiz).
+    # Kullanıcı şartı: kredinin üstünde TEK KURUŞ çıkmayacak. Kampanya sürdükçe
+    # bu satır HER AY SONUNA taşınır; kampanya bitince silinir.
+    ("2026-10-31", "Apple Ads: ay sonu kredi kontrolü",
+     "ads.apple.com → Billing: kalan kredi Kasım bütçesini karşılıyor mu? "
+     "Karşılamıyorsa bütçeyi kalan krediye çek ya da kampanyayı DURDUR — "
+     "1 Kasım'da bütçe sıfırlanır, kredi bitmişse karttan çekilir."),
     ("2027-01-07", "Madrid/EUIPO rüçhan penceresi",
      "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
      "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
