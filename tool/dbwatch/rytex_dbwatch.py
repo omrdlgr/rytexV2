@@ -492,24 +492,34 @@ def sms_report(sent: dict, blocked: dict,
     return lines, problems
 
 
-def sales(path: Path) -> tuple[int, int]:
-    """GERÇEK PARA ile sandbox'ı ayırır.
+def sales(path: Path) -> tuple[int, int, int]:
+    """GERÇEK PARA ile sandbox'ı VE HEDİYEYİ ayırır → (gerçek, sandbox, hediye).
 
     Ayrım kritik: 12 Ağustos'ta `environment` hiç okunmuyordu ve sandbox
     satın alması canlı DB'ye gerçek hak yazıyordu. Burada da sandbox'ı
-    gerçek satış saymak bizi yanıltırdı."""
+    gerçek satış saymak bizi yanıltırdı.
+
+    ⚠️ HEDİYE DE SATIŞ DEĞİL (2026-09-30): 28.09'da 4 testçiye verilen ömür
+    boyu promosyon hakları üretim ortamında (sandbox değil) olduğu için
+    "gerçek satış: 4" yazdı ve sahte "🎉 GERÇEK SATIŞ" müjdesi üretti.
+    `source` sütunu (backend: 'store' | 'promotional') zaten okunuyordu ama
+    yok sayılıyordu. Elle "-4" DÜŞÜLMEDİ: sabit bir çıkarma, yeni hediye
+    verilince ya da bu 4 kişiden biri gerçekten satın alınca yanlış sayardı."""
     con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     try:
         rows = con.execute(
             "SELECT active, environment, source FROM entitlements").fetchall()
     except sqlite3.Error:
-        return -1, -1
+        return -1, -1, -1
     finally:
         con.close()
-    real = sum(1 for a, e, _ in rows
-               if a and (e or "").upper() not in ("SANDBOX", ""))
-    sand = sum(1 for a, e, _ in rows if a and (e or "").upper() == "SANDBOX")
-    return real, sand
+    promo = lambda s: (s or "").lower() == "promotional"
+    real = sum(1 for a, e, s in rows
+               if a and (e or "").upper() not in ("SANDBOX", "") and not promo(s))
+    sand = sum(1 for a, e, s in rows
+               if a and (e or "").upper() == "SANDBOX" and not promo(s))
+    gift = sum(1 for a, _, s in rows if a and promo(s))
+    return real, sand, gift
 
 
 # ── 3. Fly snapshot tazeliği ───────────────────────────────────────────
@@ -718,6 +728,7 @@ def main() -> int:
     # susuyor ve satır ancak 10:00/21:00 raporunda görünüyordu. İlk gerçek
     # satış 11 saate kadar geç öğrenilebilirdi. Bu bayrak susturmayı deler.
     sale_jump = None
+    gift = 0          # sales() koşmazsa rapor satırı NameError vermesin
     try:
         token = os.urandom(8).hex()
         r = remote_step(token)
@@ -767,7 +778,7 @@ def main() -> int:
             problems.append(f"Fly anlık görüntüsü (snapshot) bayat: {age_h:.0f} saat")
 
         # Gerçek satış YEDEKTEN okunur — ek API yok, veri zaten elimizde.
-        real, sand = sales(dest)
+        real, sand, gift = sales(dest)
 
         prev_state = json.loads(STATE.read_text()) if STATE.exists() else {}
         # ⚠️ prev YOKSA TETİKLEMEZ: ilk koşuda 0'dan 0'a 'sıçrama' uydurup
@@ -869,6 +880,8 @@ def main() -> int:
             # sorusu soruluyor, sandbox o soruyu bulandırıyor. Ayrım kodda
             # duruyor, yalnız gösterilmiyor.
             lines.append(f"💳 gerçek satış: {real}{delta('real', real)}")
+            if gift > 0:
+                lines.append(f"🎁 hediye (satış sayılmaz): {gift}")
         if fb_users >= 0:
             lines.append(f"📱 telefonla giriş: {fb_users}{delta('fb', fb_users)}"
                          f" · SMS bölge: {len(regions)} ülke")
