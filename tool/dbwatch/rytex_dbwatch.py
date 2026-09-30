@@ -634,9 +634,8 @@ ETEBS_NOTE = (
     "(2026/087181). Tebliğ düşerse KARŞI GÖRÜŞ İÇİN 1 AY başlar; "
     "kaçarsa kullanım ispatı talebi dahil savunma hakkı yanar. "
     "epats.turkpatent.gov.tr → Şahsıma Yapılan Tebligatlar. "
-    "28.09.2026 durumu: tek tebligat var (28.07 yayım bildirimi), EPATS'ta "
-    "tek itiraz. 30.09'da evrak listesine son kez bak — son gün yapılan "
-    "itiraz listeye geç düşebilir."
+    "İkinci itiraz YOK (EPATS 30.09 mesai teyidi) — yalnız mevcut itirazın "
+    "tebliği bekleniyor; tebligat sadece ETEBS'e düşer, mail/SMS garanti değil."
 )
 
 # Raporda görünmeye başladığı eşik, "sorun" sayıldığı eşik ve geçtikten
