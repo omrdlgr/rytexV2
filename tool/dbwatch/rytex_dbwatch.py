@@ -589,18 +589,12 @@ DEADLINES = [
     # kampanyayı ISS'in Play üretim yayınına erteledi; Ekim'de kampanya
     # çalışmayacağı için 24.10'dan itibaren sahte alarm üretirdi. Kampanya
     # BAŞLADIĞI AY o ayın son günü için yeniden eklenecek (bkz. APPLE_ADS_DENEY.md).
-    # 🔴 TEBLİĞ GELDİ (2026-10-04): İtiraz Bildirimi Yazısı E-71248886-130-
-    # 260701416, tarih 03.10.2026, ETEBS'e düştü (mail 04.10 20:08), kullanıcı
-    # 04.10'da açtı. Karşı görüş tebliğden itibaren 1 AY. Elektronik tebligat
-    # genel kurala göre ulaştığı günü izleyen 5. günün sonunda yapılmış sayılır
-    # (açmak tarihi değiştirmez) → 9 Kasım'a uzayabilir; TÜRKPATENT'in farklı
-    # uygulama ihtimaline karşı EN ERKEN yorum yazıldı: açılış 04.10 → 04.11.
-    # Hedef 02.11. 7 gün kala (28.10) 🔴 SORUN'a döner — bilinçli.
-    ("2026-11-04", "Marka karşı görüş son günü (2026/087181)",
-     "RETEK itirazına karşı görüş + KULLANIM İSPATI TALEBİ (yalnız bu sürede "
-     "ileri sürülebilir). EPATS → Başvuru Sonrası İşlemler → Marka İtiraza "
-     "Karşı Görüş Bildirme. Taslak: ~/projects/RYTEX_karsi_gorus_TASLAK.md. "
-     "En erken yorumla son gün; hedef 02.11."),
+    # ℹ️ 04.11 marka karşı görüş satırı KALDIRILDI (2026-10-04): karşı görüş +
+    # kullanım ispatı talebi AYNI GÜN dosyalandı — EPATS evrak 2026-GE-707337,
+    # 04.10.2026 20:48. Satır kalsaydı 28.10'dan itibaren tamamlanmış bir işi
+    # 🔴 SORUN diye bildirirdi. Sonraki adım Kurum'dan (RETEK'e kullanım delili
+    # süresi, sonra karar); ETEBS tebliğleri artık e-postaya da düşüyor
+    # (04.10'da etebs@turkpatent.gov.tr'den geldi).
     ("2027-01-07", "Madrid/EUIPO rüçhan penceresi",
      "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
      "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
