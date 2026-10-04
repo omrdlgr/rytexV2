@@ -589,6 +589,18 @@ DEADLINES = [
     # kampanyayı ISS'in Play üretim yayınına erteledi; Ekim'de kampanya
     # çalışmayacağı için 24.10'dan itibaren sahte alarm üretirdi. Kampanya
     # BAŞLADIĞI AY o ayın son günü için yeniden eklenecek (bkz. APPLE_ADS_DENEY.md).
+    # 🔴 TEBLİĞ GELDİ (2026-10-04): İtiraz Bildirimi Yazısı E-71248886-130-
+    # 260701416, tarih 03.10.2026, ETEBS'e düştü (mail 04.10 20:08), kullanıcı
+    # 04.10'da açtı. Karşı görüş tebliğden itibaren 1 AY. Elektronik tebligat
+    # genel kurala göre ulaştığı günü izleyen 5. günün sonunda yapılmış sayılır
+    # (açmak tarihi değiştirmez) → 9 Kasım'a uzayabilir; TÜRKPATENT'in farklı
+    # uygulama ihtimaline karşı EN ERKEN yorum yazıldı: açılış 04.10 → 04.11.
+    # Hedef 02.11. 7 gün kala (28.10) 🔴 SORUN'a döner — bilinçli.
+    ("2026-11-04", "Marka karşı görüş son günü (2026/087181)",
+     "RETEK itirazına karşı görüş + KULLANIM İSPATI TALEBİ (yalnız bu sürede "
+     "ileri sürülebilir). EPATS → Başvuru Sonrası İşlemler → Marka İtiraza "
+     "Karşı Görüş Bildirme. Taslak: ~/projects/RYTEX_karsi_gorus_TASLAK.md. "
+     "En erken yorumla son gün; hedef 02.11."),
     ("2027-01-07", "Madrid/EUIPO rüçhan penceresi",
      "TR başvurusunun (07.07.2026) 6 aylık önceliği. Bu tarihten sonra "
      "başvurulursa öncelik tarihi kaybedilir. EUIPO öncesi RITEX benzerlik "
@@ -628,7 +640,7 @@ DEADLINES = [
 # mesaj üretir, susturma mantığı rakam maskelediği için de hiç susmazdı —
 # günde 24 bildirim, üç gün sonra kimse okumaz. Planlı raporda (10:00/21:00)
 # günde iki kez görünmesi yeterli.
-ETEBS_WATCH = True
+ETEBS_WATCH = False  # 2026-10-04: tebliğ geldi, son tarih DEADLINES'ta
 ETEBS_NOTE = (
     "🔔 ETEBS'i kontrol et — marka itirazının tebliği bekleniyor "
     "(2026/087181). Tebliğ düşerse KARŞI GÖRÜŞ İÇİN 1 AY başlar; "
