@@ -170,11 +170,25 @@ export default async function partnerRoutes(fastify) {
   // GET /api/partner/list
   // Çağıranın onaylı partner hash'leri. İstemci offline'dayken kabul edilen
   // istekleri yakalayıp yerel "pending" durumunu düzeltmek için kullanılır.
+  //
+  // `premium`: bu partnerlerden hangisinin hakkı SUNUCUYA GÖRE aktif
+  // (ödenmiş abonelik ya da hediye). Kural (karar 2026-10-09): partnerlik,
+  // iki ucundan BİRİ premium ise açık. Sahip, izleyicisi ödediyse
+  // paylaşımının duraklamadığını; izleyici, sahibinin aboneliği yenilendiyse
+  // (sahip uygulamayı açmamış olsa da) paylaşımın açık olduğunu buradan
+  // öğrenir. Deneme ve grandfather cihazda hesaplanıyor, burada YOK.
+  //
+  // ⚠️ AYRI ALAN: `partners` dizisinin biçimi değişmedi. Eski istemciler onu
+  // `cast<String>()` ile okuyor; nesne dizisine çevirmek onları kırardı.
   fastify.get('/partner/list', async (request, reply) => {
     const claims = authenticateRequest(request, reply);
     if (!claims) return;
 
-    return reply.send({ partners: partnerships.listFor(claims.sub) });
+    const list = partnerships.listFor(claims.sub);
+    return reply.send({
+      partners: list,
+      premium: list.filter((h) => entitlements.isActive(h)),
+    });
   });
 
   // ── Jetonlu davet (QR / paylaşılabilir bağlantı) ───────────────────
