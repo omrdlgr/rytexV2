@@ -8,7 +8,9 @@ import { sendPush } from '../firebase.js';
 // "bu cihaza bir şey geldi" olgusunu görür.
 
 // Jenerik bildirim gövdesi — istemcinin kayıtta bildirdiği dile göre.
-const PUSH_BODY = {
+// İstemcinin desteklediği her içerik dili burada olmalı (test/push_body_langs_smoke.mjs
+// kilitler). Eksik dil sessizce İngilizceye düşer — nb/nl/sv 2026-10-10'a kadar öyleydi.
+export const PUSH_BODY = {
   tr: 'Yeni bir bildirimin var.',
   en: 'You have a new notification.',
   es: 'Tienes una notificación nueva.',
@@ -20,6 +22,9 @@ const PUSH_BODY = {
   ja: '新しい通知があります。',
   zh: '你有一条新通知。',
   ru: 'У тебя новое уведомление.',
+  nl: 'Je hebt een nieuwe melding.',
+  sv: 'Du har en ny avisering.',
+  nb: 'Du har et nytt varsel.',
 };
 
 /// [toHash] kullanıcısına jenerik gizli bildirim gönderir. Dönüş: FCM kabul
